@@ -678,6 +678,47 @@ button:active {
   box-shadow: 0 25px 55px rgba(15, 23, 42, 0.12);
 }
 
+/* Match Type Toggle */
+.match-type-row {
+  justify-content: center;
+}
+
+.match-type-toggle {
+  display: flex;
+  gap: 0.5rem;
+  background: rgba(99, 102, 241, 0.08);
+  padding: 0.35rem;
+  border-radius: 16px;
+}
+
+.match-type-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  background: transparent;
+  color: #64748b;
+}
+
+.match-type-btn:hover {
+  background: rgba(255, 255, 255, 0.7);
+  color: #475569;
+}
+
+.match-type-btn.active {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+/* Solo mode - hide second player selects */
+.match-form.solo-mode .player2-group {
+  display: none;
+}
+
 .teams-container {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) 80px minmax(300px, 1fr);
@@ -1754,6 +1795,21 @@ button:active {
   margin-bottom: 0.5rem;
   font-size: 0.8rem;
   color: #666;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.match-type-badge {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.match-card.solo-match .match-type-badge {
+  background: linear-gradient(135deg, #f093fb, #f5576c);
 }
 
 .match-details {

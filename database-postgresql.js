@@ -96,15 +96,38 @@ class PickleballDatabasePostgreSQL {
           id SERIAL PRIMARY KEY,
           season_id INTEGER NOT NULL REFERENCES seasons(id),
           play_date DATE NOT NULL,
+          match_type VARCHAR(10) DEFAULT 'duo' CHECK (match_type IN ('solo', 'duo')),
           player1_id INTEGER NOT NULL REFERENCES players(id),
-          player2_id INTEGER NOT NULL REFERENCES players(id),
+          player2_id INTEGER REFERENCES players(id),
           player3_id INTEGER NOT NULL REFERENCES players(id),
-          player4_id INTEGER NOT NULL REFERENCES players(id),
+          player4_id INTEGER REFERENCES players(id),
           team1_score INTEGER NOT NULL,
           team2_score INTEGER NOT NULL,
           winning_team INTEGER NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+      `)
+
+      // Add match_type column if it doesn't exist (for existing databases)
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_type VARCHAR(10) DEFAULT 'duo' CHECK (match_type IN ('solo', 'duo'));
+        EXCEPTION WHEN duplicate_column THEN NULL;
+        END $$;
+      `)
+
+      // Make player2_id and player4_id nullable for solo matches (migration for existing databases)
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE matches ALTER COLUMN player2_id DROP NOT NULL;
+        EXCEPTION WHEN others THEN NULL;
+        END $$;
+      `)
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE matches ALTER COLUMN player4_id DROP NOT NULL;
+        EXCEPTION WHEN others THEN NULL;
+        END $$;
       `)
 
       // Create indexes for better performance
@@ -318,18 +341,18 @@ class PickleballDatabasePostgreSQL {
   }
 
   // Matches CRUD operations
-  async addMatch(seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam) {
+  async addMatch(seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam, matchType = 'duo') {
     const result = await this.query(`
-      INSERT INTO matches (season_id, play_date, player1_id, player2_id, player3_id, player4_id, team1_score, team2_score, winning_team) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id
-    `, [seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam])
+      INSERT INTO matches (season_id, play_date, match_type, player1_id, player2_id, player3_id, player4_id, team1_score, team2_score, winning_team) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id
+    `, [seasonId, playDate, matchType, player1Id, player2Id || null, player3Id, player4Id || null, team1Score, team2Score, winningTeam])
     return result.rows[0].id
   }
 
   async getMatches(limit = null) {
     let query = `
       SELECT m.id, m.season_id, TO_CHAR(m.play_date, 'YYYY-MM-DD') as play_date,
-        m.player1_id, m.player2_id, m.player3_id, m.player4_id,
+        m.match_type, m.player1_id, m.player2_id, m.player3_id, m.player4_id,
         m.team1_score, m.team2_score, m.winning_team, m.created_at,
         s.name as season_name,
         p1.name as player1_name, p2.name as player2_name, 
@@ -337,9 +360,9 @@ class PickleballDatabasePostgreSQL {
       FROM matches m
       JOIN seasons s ON m.season_id = s.id
       JOIN players p1 ON m.player1_id = p1.id
-      JOIN players p2 ON m.player2_id = p2.id
+      LEFT JOIN players p2 ON m.player2_id = p2.id
       JOIN players p3 ON m.player3_id = p3.id
-      JOIN players p4 ON m.player4_id = p4.id
+      LEFT JOIN players p4 ON m.player4_id = p4.id
       ORDER BY m.play_date DESC, m.created_at DESC
     `
     
@@ -356,7 +379,7 @@ class PickleballDatabasePostgreSQL {
   async getMatchesByPlayDate(playDate) {
     const result = await this.query(`
       SELECT m.id, m.season_id, TO_CHAR(m.play_date, 'YYYY-MM-DD') as play_date,
-        m.player1_id, m.player2_id, m.player3_id, m.player4_id,
+        m.match_type, m.player1_id, m.player2_id, m.player3_id, m.player4_id,
         m.team1_score, m.team2_score, m.winning_team, m.created_at,
         s.name as season_name,
         p1.name as player1_name, p2.name as player2_name, 
@@ -364,9 +387,9 @@ class PickleballDatabasePostgreSQL {
       FROM matches m
       JOIN seasons s ON m.season_id = s.id
       JOIN players p1 ON m.player1_id = p1.id
-      JOIN players p2 ON m.player2_id = p2.id
+      LEFT JOIN players p2 ON m.player2_id = p2.id
       JOIN players p3 ON m.player3_id = p3.id
-      JOIN players p4 ON m.player4_id = p4.id
+      LEFT JOIN players p4 ON m.player4_id = p4.id
       WHERE DATE(m.play_date) = $1
       ORDER BY m.created_at DESC
     `, [playDate])
@@ -376,7 +399,7 @@ class PickleballDatabasePostgreSQL {
   async getMatchesBySeason(seasonId) {
     const result = await this.query(`
       SELECT m.id, m.season_id, TO_CHAR(m.play_date, 'YYYY-MM-DD') as play_date,
-        m.player1_id, m.player2_id, m.player3_id, m.player4_id,
+        m.match_type, m.player1_id, m.player2_id, m.player3_id, m.player4_id,
         m.team1_score, m.team2_score, m.winning_team, m.created_at,
         s.name as season_name,
         p1.name as player1_name, p2.name as player2_name, 
@@ -384,9 +407,9 @@ class PickleballDatabasePostgreSQL {
       FROM matches m
       JOIN seasons s ON m.season_id = s.id
       JOIN players p1 ON m.player1_id = p1.id
-      JOIN players p2 ON m.player2_id = p2.id
+      LEFT JOIN players p2 ON m.player2_id = p2.id
       JOIN players p3 ON m.player3_id = p3.id
-      JOIN players p4 ON m.player4_id = p4.id
+      LEFT JOIN players p4 ON m.player4_id = p4.id
       WHERE m.season_id = $1
       ORDER BY m.play_date DESC, m.created_at DESC
     `, [seasonId])
@@ -401,9 +424,9 @@ class PickleballDatabasePostgreSQL {
       FROM matches m
       JOIN seasons s ON m.season_id = s.id
       JOIN players p1 ON m.player1_id = p1.id
-      JOIN players p2 ON m.player2_id = p2.id
+      LEFT JOIN players p2 ON m.player2_id = p2.id
       JOIN players p3 ON m.player3_id = p3.id
-      JOIN players p4 ON m.player4_id = p4.id
+      LEFT JOIN players p4 ON m.player4_id = p4.id
       WHERE DATE(m.play_date) = $1
       ORDER BY m.created_at DESC
     `, [date])
@@ -418,22 +441,22 @@ class PickleballDatabasePostgreSQL {
       FROM matches m
       JOIN seasons s ON m.season_id = s.id
       JOIN players p1 ON m.player1_id = p1.id
-      JOIN players p2 ON m.player2_id = p2.id
+      LEFT JOIN players p2 ON m.player2_id = p2.id
       JOIN players p3 ON m.player3_id = p3.id
-      JOIN players p4 ON m.player4_id = p4.id
+      LEFT JOIN players p4 ON m.player4_id = p4.id
       WHERE m.id = $1
     `, [matchId])
     return result.rows[0] || null
   }
 
-  async updateMatch(matchId, seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam) {
+  async updateMatch(matchId, seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam, matchType = 'duo') {
     await this.query(`
       UPDATE matches 
-      SET season_id = $1, play_date = $2, player1_id = $3, player2_id = $4, 
-          player3_id = $5, player4_id = $6, team1_score = $7, team2_score = $8, 
-          winning_team = $9
-      WHERE id = $10
-    `, [seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam, matchId])
+      SET season_id = $1, play_date = $2, match_type = $3, player1_id = $4, player2_id = $5, 
+          player3_id = $6, player4_id = $7, team1_score = $8, team2_score = $9, 
+          winning_team = $10
+      WHERE id = $11
+    `, [seasonId, playDate, matchType, player1Id, player2Id || null, player3Id, player4Id || null, team1Score, team2Score, winningTeam, matchId])
   }
 
   async deleteMatch(matchId) {

@@ -44,12 +44,13 @@ export const createMatchRouter = ({
   }))
 
   const validateMatchPayload = [
+    body('matchType').optional().isIn(['solo', 'duo']).withMessage('Match type must be solo or duo'),
     body('seasonId').isInt().withMessage('Valid season ID is required'),
     body('playDate').isISO8601().withMessage('Valid play date is required'),
     body('player1Id').isInt().withMessage('Valid player 1 ID is required'),
-    body('player2Id').isInt().withMessage('Valid player 2 ID is required'),
+    body('player2Id').optional({ nullable: true }).isInt().withMessage('Valid player 2 ID is required for duo'),
     body('player3Id').isInt().withMessage('Valid player 3 ID is required'),
-    body('player4Id').isInt().withMessage('Valid player 4 ID is required'),
+    body('player4Id').optional({ nullable: true }).isInt().withMessage('Valid player 4 ID is required for duo'),
     body('team1Score').isInt({ min: 0 }).withMessage('Valid team 1 score is required'),
     body('team2Score').isInt({ min: 0 }).withMessage('Valid team 2 score is required'),
     body('winningTeam').isInt({ min: 1, max: 2 }).withMessage('Winning team must be 1 or 2')
@@ -63,13 +64,28 @@ export const createMatchRouter = ({
     validateMatchPayload,
     handleValidationErrors,
     asyncHandler(async (req, res) => {
-      const { seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam } = req.body
-      const playerIds = [player1Id, player2Id, player3Id, player4Id]
-      if (new Set(playerIds).size !== 4) {
-        res.status(400).json({ error: 'All players must be different' })
-        return
+      const { matchType = 'duo', seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam } = req.body
+      
+      // Validate players based on match type
+      if (matchType === 'solo') {
+        if (player1Id === player3Id) {
+          res.status(400).json({ error: 'Players must be different' })
+          return
+        }
+      } else {
+        // Duo mode - all 4 players required
+        if (!player2Id || !player4Id) {
+          res.status(400).json({ error: 'All 4 players required for duo match' })
+          return
+        }
+        const playerIds = [player1Id, player2Id, player3Id, player4Id]
+        if (new Set(playerIds).size !== 4) {
+          res.status(400).json({ error: 'All players must be different' })
+          return
+        }
       }
-      const matchId = await db.addMatch(seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam)
+      
+      const matchId = await db.addMatch(seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam, matchType)
       rankingsCache.clear()
       setTimeout(() => rankingsCache.preloadCommonData(db), 100)
       res.json({ success: true, id: matchId })
@@ -89,13 +105,27 @@ export const createMatchRouter = ({
         res.status(404).json({ error: 'Match not found' })
         return
       }
-      const { seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam } = req.body
-      const playerIds = [player1Id, player2Id, player3Id, player4Id]
-      if (new Set(playerIds).size !== 4) {
-        res.status(400).json({ error: 'All players must be different' })
-        return
+      const { matchType = 'duo', seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam } = req.body
+      
+      // Validate players based on match type
+      if (matchType === 'solo') {
+        if (player1Id === player3Id) {
+          res.status(400).json({ error: 'Players must be different' })
+          return
+        }
+      } else {
+        if (!player2Id || !player4Id) {
+          res.status(400).json({ error: 'All 4 players required for duo match' })
+          return
+        }
+        const playerIds = [player1Id, player2Id, player3Id, player4Id]
+        if (new Set(playerIds).size !== 4) {
+          res.status(400).json({ error: 'All players must be different' })
+          return
+        }
       }
-      await db.updateMatch(matchId, seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam)
+      
+      await db.updateMatch(matchId, seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam, matchType)
       rankingsCache.clear()
       setTimeout(() => rankingsCache.preloadCommonData(db), 100)
       res.json({ success: true, message: 'Match updated successfully' })

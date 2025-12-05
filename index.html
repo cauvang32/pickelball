@@ -64,15 +64,25 @@
                   </select>
                 </div>
               </div>
+
+              <div class="form-row match-type-row">
+                <div class="form-group">
+                  <label>Loại trận đấu:</label>
+                  <div class="match-type-toggle">
+                    <button type="button" id="matchTypeSolo" class="match-type-btn">🏓 Đơn (1v1)</button>
+                    <button type="button" id="matchTypeDuo" class="match-type-btn active">👥 Đôi (2v2)</button>
+                  </div>
+                </div>
+              </div>
               
               <div class="teams-container">
                 <div class="team-section">
-                  <h3>Đội 1</h3>
+                  <h3 class="team-title">Đội 1</h3>
                   <div class="team-players">
                     <select id="player1">
                       <option value="">Chọn người chơi 1</option>
                     </select>
-                    <select id="player2">
+                    <select id="player2" class="player2-group">
                       <option value="">Chọn người chơi 2</option>
                     </select>
                   </div>
@@ -85,12 +95,12 @@
                 <div class="vs">VS</div>
                 
                 <div class="team-section">
-                  <h3>Đội 2</h3>
+                  <h3 class="team-title">Đội 2</h3>
                   <div class="team-players">
                     <select id="player3">
                       <option value="">Chọn người chơi 1</option>
                     </select>
-                    <select id="player4">
+                    <select id="player4" class="player2-group">
                       <option value="">Chọn người chơi 2</option>
                     </select>
                   </div>

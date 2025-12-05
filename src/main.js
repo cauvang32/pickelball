@@ -19,6 +19,7 @@ class PickleballRankingSystem {
     this.csrfToken = null // CSRF token for secure requests
     this.currentWinningTeam = null
     this.isManualWinnerMode = false
+    this.matchType = 'duo' // 'solo' or 'duo'
     this.init()
   }
 
@@ -688,9 +689,47 @@ class PickleballRankingSystem {
         useAutoWinnerBtn.addEventListener('click', () => this.toggleWinnerMode(false))
       }
 
+      // Match type toggle (Solo/Duo)
+      const matchTypeSoloBtn = document.getElementById('matchTypeSolo')
+      const matchTypeDuoBtn = document.getElementById('matchTypeDuo')
+      if (matchTypeSoloBtn && matchTypeDuoBtn) {
+        matchTypeSoloBtn.addEventListener('click', () => this.setMatchType('solo'))
+        matchTypeDuoBtn.addEventListener('click', () => this.setMatchType('duo'))
+      }
 
     } catch (error) {
       console.error('Error setting up event listeners:', error)
+    }
+  }
+
+  setMatchType(type) {
+    this.matchType = type
+    const matchForm = document.querySelector('.match-form')
+    const soloBtn = document.getElementById('matchTypeSolo')
+    const duoBtn = document.getElementById('matchTypeDuo')
+    const teamTitles = document.querySelectorAll('.team-title')
+    
+    if (type === 'solo') {
+      matchForm?.classList.add('solo-mode')
+      soloBtn?.classList.add('active')
+      duoBtn?.classList.remove('active')
+      // Update team labels for solo mode
+      teamTitles.forEach((title, index) => {
+        title.textContent = index === 0 ? 'Người chơi 1' : 'Người chơi 2'
+      })
+      // Clear player2 and player4 values
+      const player2 = document.getElementById('player2')
+      const player4 = document.getElementById('player4')
+      if (player2) player2.value = ''
+      if (player4) player4.value = ''
+    } else {
+      matchForm?.classList.remove('solo-mode')
+      duoBtn?.classList.add('active')
+      soloBtn?.classList.remove('active')
+      // Restore team labels for duo mode
+      teamTitles.forEach((title, index) => {
+        title.textContent = index === 0 ? 'Đội 1' : 'Đội 2'
+      })
     }
   }
 
@@ -890,12 +929,18 @@ class PickleballRankingSystem {
     const playDate = document.getElementById('matchDate').value
     const seasonId = parseInt(document.getElementById('matchSeason').value)
     const player1Id = parseInt(document.getElementById('player1').value)
-    const player2Id = parseInt(document.getElementById('player2').value)
     const player3Id = parseInt(document.getElementById('player3').value)
-    const player4Id = parseInt(document.getElementById('player4').value)
     const team1Score = parseInt(document.getElementById('team1Score').value)
     const team2Score = parseInt(document.getElementById('team2Score').value)
     const winningTeam = parseInt(document.getElementById('winningTeam').value)
+    
+    // For duo mode, get player2 and player4
+    let player2Id = null
+    let player4Id = null
+    if (this.matchType === 'duo') {
+      player2Id = parseInt(document.getElementById('player2').value)
+      player4Id = parseInt(document.getElementById('player4').value)
+    }
 
     // Validation
     if (!playDate) {
@@ -908,16 +953,27 @@ class PickleballRankingSystem {
       return
     }
 
-    const playerIds = [player1Id, player2Id, player3Id, player4Id]
-    if (playerIds.some(id => isNaN(id))) {
-      this.updateFileStatus('❌ Vui lòng chọn đủ 4 người chơi', 'error')
-      return
-    }
-
-    const uniquePlayerIds = [...new Set(playerIds)]
-    if (uniquePlayerIds.length !== 4) {
-      this.updateFileStatus('❌ Cần 4 người chơi khác nhau', 'error')
-      return
+    // Validate players based on match type
+    if (this.matchType === 'solo') {
+      if (isNaN(player1Id) || isNaN(player3Id)) {
+        this.updateFileStatus('❌ Vui lòng chọn 2 người chơi', 'error')
+        return
+      }
+      if (player1Id === player3Id) {
+        this.updateFileStatus('❌ Cần 2 người chơi khác nhau', 'error')
+        return
+      }
+    } else {
+      const playerIds = [player1Id, player2Id, player3Id, player4Id]
+      if (playerIds.some(id => isNaN(id))) {
+        this.updateFileStatus('❌ Vui lòng chọn đủ 4 người chơi', 'error')
+        return
+      }
+      const uniquePlayerIds = [...new Set(playerIds)]
+      if (uniquePlayerIds.length !== 4) {
+        this.updateFileStatus('❌ Cần 4 người chơi khác nhau', 'error')
+        return
+      }
     }
 
     if (isNaN(team1Score) || isNaN(team2Score) || team1Score < 0 || team2Score < 0) {
@@ -940,6 +996,7 @@ class PickleballRankingSystem {
       const response = await this.makeAuthenticatedRequest(`${this.apiBase}/matches`, {
         method: 'POST',
         body: JSON.stringify({
+          matchType: this.matchType,
           seasonId,
           playDate,
           player1Id,
@@ -964,8 +1021,9 @@ class PickleballRankingSystem {
         document.getElementById('team2Score').value = ''
         document.getElementById('winningTeam').value = ''
         
-        // Reset to auto winner mode
+        // Reset to auto winner mode and duo mode
         this.toggleWinnerMode(false)
+        this.setMatchType('duo')
         this.setTodaysDate()
         
         // Update displays
@@ -1202,9 +1260,15 @@ class PickleballRankingSystem {
     if (!container) return
 
     container.innerHTML = matches.map(match => {
-      const team1Players = `${match.player1_name} & ${match.player2_name}`
-      const team2Players = `${match.player3_name} & ${match.player4_name}`
+      const isSolo = match.match_type === 'solo'
+      const team1Players = isSolo 
+        ? match.player1_name 
+        : `${match.player1_name} & ${match.player2_name || '?'}`
+      const team2Players = isSolo 
+        ? match.player3_name 
+        : `${match.player3_name} & ${match.player4_name || '?'}`
       const winnerClass = match.winning_team === 1 ? 'team1-win' : 'team2-win'
+      const matchTypeLabel = isSolo ? '🏓 Đơn' : '👥 Đôi'
       
       const userRole = this.user?.role
       let editDeleteButtons = ''
@@ -1219,9 +1283,10 @@ class PickleballRankingSystem {
       }
       
       return `
-        <div class="match-card ${winnerClass}">
+        <div class="match-card ${winnerClass} ${isSolo ? 'solo-match' : 'duo-match'}">
           <div class="match-info">
             <div class="match-date">📅 ${this.formatDate(match.play_date)}</div>
+            <div class="match-type-badge">${matchTypeLabel}</div>
             <div class="match-season">🏆 ${match.season_name}</div>
             ${editDeleteButtons}
           </div>
@@ -2107,10 +2172,16 @@ class PickleballRankingSystem {
       return
     }
 
+    const isSolo = match.match_type === 'solo'
+    const team1Display = isSolo ? match.player1_name : `${match.player1_name} & ${match.player2_name || '?'}`
+    const team2Display = isSolo ? match.player3_name : `${match.player3_name} & ${match.player4_name || '?'}`
+    const matchTypeLabel = isSolo ? '🏓 Đơn' : '👥 Đôi'
+
     const confirmDelete = confirm(
       `Bạn có chắc chắn muốn xóa trận đấu này?\n\n` +
+      `${matchTypeLabel}\n` +
       `📅 ${this.formatDate(match.play_date)}\n` +
-      `👥 ${match.player1_name} & ${match.player2_name} vs ${match.player3_name} & ${match.player4_name}\n` +
+      `${team1Display} vs ${team2Display}\n` +
       `📊 ${match.team1_score} - ${match.team2_score}\n\n` +
       `Hành động này không thể hoàn tác.`
     )
@@ -2141,6 +2212,7 @@ class PickleballRankingSystem {
   }
 
   showMatchEditModal(match) {
+    const isSolo = match.match_type === 'solo'
     const modal = document.createElement('div')
     modal.className = 'modal'
     modal.innerHTML = `
@@ -2161,20 +2233,30 @@ class PickleballRankingSystem {
             </select>
           </div>
 
+          <div class="form-group">
+            <label>Loại trận đấu:</label>
+            <div class="match-type-toggle">
+              <button type="button" id="editMatchTypeSolo" class="match-type-btn ${isSolo ? 'active' : ''}">🏓 Đơn (1v1)</button>
+              <button type="button" id="editMatchTypeDuo" class="match-type-btn ${!isSolo ? 'active' : ''}">👥 Đôi (2v2)</button>
+            </div>
+            <input type="hidden" id="editMatchType" value="${match.match_type || 'duo'}">
+          </div>
+
           <div class="teams">
             <div class="team-section">
-              <h3>Đội 1</h3>
+              <h3 class="edit-team-title">${isSolo ? 'Người chơi 1' : 'Đội 1'}</h3>
               <div class="form-group">
-                <label for="editPlayer1">Người chơi 1:</label>
+                <label for="editPlayer1">${isSolo ? 'Người chơi:' : 'Người chơi 1:'}</label>
                 <select id="editPlayer1" required>
                   ${this.players.map(player => 
                     `<option value="${player.id}" ${player.id === match.player1_id ? 'selected' : ''}>${player.name}</option>`
                   ).join('')}
                 </select>
               </div>
-              <div class="form-group">
+              <div class="form-group edit-player2-group" style="${isSolo ? 'display:none' : ''}">
                 <label for="editPlayer2">Người chơi 2:</label>
-                <select id="editPlayer2" required>
+                <select id="editPlayer2">
+                  <option value="">-- Không chọn --</option>
                   ${this.players.map(player => 
                     `<option value="${player.id}" ${player.id === match.player2_id ? 'selected' : ''}>${player.name}</option>`
                   ).join('')}
@@ -2187,18 +2269,19 @@ class PickleballRankingSystem {
             </div>
 
             <div class="team-section">
-              <h3>Đội 2</h3>
+              <h3 class="edit-team-title">${isSolo ? 'Người chơi 2' : 'Đội 2'}</h3>
               <div class="form-group">
-                <label for="editPlayer3">Người chơi 3:</label>
+                <label for="editPlayer3">${isSolo ? 'Người chơi:' : 'Người chơi 1:'}</label>
                 <select id="editPlayer3" required>
                   ${this.players.map(player => 
                     `<option value="${player.id}" ${player.id === match.player3_id ? 'selected' : ''}>${player.name}</option>`
                   ).join('')}
                 </select>
               </div>
-              <div class="form-group">
-                <label for="editPlayer4">Người chơi 4:</label>
-                <select id="editPlayer4" required>
+              <div class="form-group edit-player2-group" style="${isSolo ? 'display:none' : ''}">
+                <label for="editPlayer4">Người chơi 2:</label>
+                <select id="editPlayer4">
+                  <option value="">-- Không chọn --</option>
                   ${this.players.map(player => 
                     `<option value="${player.id}" ${player.id === match.player4_id ? 'selected' : ''}>${player.name}</option>`
                   ).join('')}
@@ -2229,33 +2312,80 @@ class PickleballRankingSystem {
     `
     
     document.body.appendChild(modal)
+
+    // Match type toggle handlers
+    const soloBtn = document.getElementById('editMatchTypeSolo')
+    const duoBtn = document.getElementById('editMatchTypeDuo')
+    const matchTypeInput = document.getElementById('editMatchType')
+    const player2Groups = modal.querySelectorAll('.edit-player2-group')
+    const teamTitles = modal.querySelectorAll('.edit-team-title')
+    const playerLabels = modal.querySelectorAll('.team-section .form-group:first-of-type label')
+
+    soloBtn.addEventListener('click', () => {
+      soloBtn.classList.add('active')
+      duoBtn.classList.remove('active')
+      matchTypeInput.value = 'solo'
+      player2Groups.forEach(g => g.style.display = 'none')
+      // Update titles for solo mode
+      if (teamTitles[0]) teamTitles[0].textContent = 'Người chơi 1'
+      if (teamTitles[1]) teamTitles[1].textContent = 'Người chơi 2'
+      playerLabels.forEach(label => label.textContent = 'Người chơi:')
+    })
+
+    duoBtn.addEventListener('click', () => {
+      duoBtn.classList.add('active')
+      soloBtn.classList.remove('active')
+      matchTypeInput.value = 'duo'
+      player2Groups.forEach(g => g.style.display = '')
+      // Update titles for duo mode
+      if (teamTitles[0]) teamTitles[0].textContent = 'Đội 1'
+      if (teamTitles[1]) teamTitles[1].textContent = 'Đội 2'
+      playerLabels.forEach(label => label.textContent = 'Người chơi 1:')
+    })
     
     document.getElementById('editMatchForm').addEventListener('submit', async (e) => {
       e.preventDefault()
       
+      const matchType = document.getElementById('editMatchType').value
       const seasonId = parseInt(document.getElementById('editSeasonId').value)
       const playDate = document.getElementById('editMatchDate').value
       const player1Id = parseInt(document.getElementById('editPlayer1').value)
-      const player2Id = parseInt(document.getElementById('editPlayer2').value)
       const player3Id = parseInt(document.getElementById('editPlayer3').value)
-      const player4Id = parseInt(document.getElementById('editPlayer4').value)
       const team1Score = parseInt(document.getElementById('editTeam1Score').value)
       const team2Score = parseInt(document.getElementById('editTeam2Score').value)
       const winningTeam = parseInt(document.getElementById('editWinningTeam').value)
       const errorDiv = document.getElementById('editMatchError')
+
+      let player2Id = null
+      let player4Id = null
+      if (matchType === 'duo') {
+        player2Id = parseInt(document.getElementById('editPlayer2').value) || null
+        player4Id = parseInt(document.getElementById('editPlayer4').value) || null
+      }
       
       // Validation
-      if (!playDate || !seasonId || !player1Id || !player2Id || !player3Id || !player4Id || 
+      if (!playDate || !seasonId || !player1Id || !player3Id || 
           isNaN(team1Score) || isNaN(team2Score) || !winningTeam) {
         errorDiv.textContent = 'Vui lòng điền đầy đủ thông tin'
         return
       }
 
-      const playerIds = [player1Id, player2Id, player3Id, player4Id]
-      const uniquePlayerIds = [...new Set(playerIds)]
-      if (uniquePlayerIds.length !== 4) {
-        errorDiv.textContent = 'Cần 4 người chơi khác nhau'
-        return
+      if (matchType === 'solo') {
+        if (player1Id === player3Id) {
+          errorDiv.textContent = 'Cần 2 người chơi khác nhau'
+          return
+        }
+      } else {
+        if (!player2Id || !player4Id) {
+          errorDiv.textContent = 'Vui lòng chọn đủ 4 người chơi cho trận đôi'
+          return
+        }
+        const playerIds = [player1Id, player2Id, player3Id, player4Id]
+        const uniquePlayerIds = [...new Set(playerIds)]
+        if (uniquePlayerIds.length !== 4) {
+          errorDiv.textContent = 'Cần 4 người chơi khác nhau'
+          return
+        }
       }
 
       if (team1Score < 0 || team2Score < 0) {
@@ -2267,6 +2397,7 @@ class PickleballRankingSystem {
         const response = await this.makeAuthenticatedRequest(`${this.apiBase}/matches/${match.id}`, {
           method: 'PUT',
           body: JSON.stringify({
+            matchType,
             seasonId,
             playDate,
             player1Id,
