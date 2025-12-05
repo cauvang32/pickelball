@@ -787,7 +787,7 @@ app.use(express.json({
 
 // Subpath configuration - support both SUBPATH and BASE_PATH env vars
 // Use root path for development, pickleball subpath for production by default
-const SUBPATH = process.env.SUBPATH || process.env.BASE_PATH || (process.env.NODE_ENV === 'production' ? '/pickleball' : '/')
+const SUBPATH = process.env.SUBPATH || process.env.BASE_PATH || '/'
 const isDevelopment = process.env.NODE_ENV === 'development'
 
 console.log('🎯 Server subpath configuration:', SUBPATH)
@@ -1119,6 +1119,14 @@ app.get('/api/csrf-token', checkAuth, (req, res) => {
   // No need to store secret in cleartext in cookies
   
   res.json({ csrfToken: token })
+})
+
+// Public config endpoint - provides BASE_PATH for frontend
+app.get('/api/config', (req, res) => {
+  res.json({
+    basePath: SUBPATH,
+    apiBase: SUBPATH === '/' ? '/api' : `${SUBPATH}/api`
+  })
 })
 
 // Login endpoint

@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig(({ mode }) => {
   // Get base path from environment or default
-  const basePath = process.env.BASE_PATH || '/pickleball/'
+  const basePath = process.env.BASE_PATH || '/'
   
   return {
     // Set base path for subpath deployment - use environment variable

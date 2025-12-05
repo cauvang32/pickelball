@@ -13,7 +13,7 @@ class PickleballRankingSystem {
     this.selectedSeason = null
     this.autoSaveEnabled = true
     this.serverMode = true
-    this.apiBase = this.getApiBaseUrl()
+    this.apiBase = null // Will be set after fetching config
     this.isAuthenticated = false
     this.user = null
     this.csrfToken = null // CSRF token for secure requests
@@ -22,64 +22,58 @@ class PickleballRankingSystem {
     this.init()
   }
 
-  // Auto-detect API base URL for subpath deployments
-  getApiBaseUrl() {
-    const currentPath = window.location.pathname
+  // Fetch API base URL from server config (follows BASE_PATH in .env)
+  async getApiBaseUrl() {
     const currentOrigin = window.location.origin
-    const currentHost = window.location.host
     
-    console.log('🔍 Detecting API base URL...')
-    console.log('📍 Current path:', currentPath)
-    console.log('🌐 Current origin:', currentOrigin)
-    console.log('🏠 Current host:', currentHost)
-    
-    // Special case: if we're on hungsanity.com or similar production domains
-    // and the path starts with /pickleball, use pickleball subpath
-    if (currentPath.startsWith('/pickleball')) {
-      const apiBase = `${currentOrigin}/pickleball/api`
-      console.log('✅ Pickleball subpath deployment detected')
-      console.log('🔗 API Base URL:', apiBase)
-      return apiBase
-    }
-    
-    // Check if we're on a production domain (not localhost)
-    const isProduction = !currentHost.includes('localhost') && !currentHost.includes('127.0.0.1')
-    
-    if (isProduction) {
-      // For production domains, check if we need to use a subpath
-      const pathSegments = currentPath.split('/').filter(segment => segment && segment !== 'index.html')
-      
-      if (pathSegments.length > 0) {
-        const potentialSubpath = pathSegments[0]
-        const commonSubpaths = ['pickleball', 'app', 'ranking', 'admin', 'dashboard']
-        
-        if (commonSubpaths.includes(potentialSubpath)) {
-          const apiBase = `${currentOrigin}/${potentialSubpath}/api`
-          console.log('✅ Production subpath detected:', potentialSubpath)
-          console.log('🔗 API Base URL:', apiBase)
-          return apiBase
-        }
+    // Try to get config from server at root /api first
+    try {
+      const response = await fetch(`${currentOrigin}/api/config`, {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      })
+      if (response.ok) {
+        const config = await response.json()
+        console.log('✅ Server config loaded:', config)
+        return `${currentOrigin}${config.apiBase}`
       }
-      
-      // Production domain but no clear subpath - try pickleball as default
-      // This handles cases where the app is served from /pickleball/ but accessed directly
-      const testApiBase = `${currentOrigin}/pickleball/api`
-      console.log('✅ Production domain - trying pickleball subpath as default')
-      console.log('🔗 API Base URL (will test):', testApiBase)
-      
-      // We'll test this URL and fall back to root if it doesn't work
-      return testApiBase
+    } catch (e) {
+      console.log('⚠️ Could not fetch config from /api/config')
     }
     
-    // Development or localhost - use root API
-    const apiBase = `${currentOrigin}/api`
-    console.log('✅ Development/localhost detected - using root API')
-    console.log('🔗 API Base URL:', apiBase)
-    return apiBase
+    // Fallback: detect from URL path
+    const currentPath = window.location.pathname
+    const pathSegments = currentPath.split('/').filter(segment => segment && segment !== 'index.html')
+    
+    if (pathSegments.length > 0) {
+      const subpath = pathSegments[0]
+      // Try subpath API
+      try {
+        const response = await fetch(`${currentOrigin}/${subpath}/api/config`, {
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        })
+        if (response.ok) {
+          const config = await response.json()
+          console.log('✅ Server config loaded from subpath:', config)
+          return `${currentOrigin}${config.apiBase}`
+        }
+      } catch (e) {
+        console.log(`⚠️ Could not fetch config from /${subpath}/api/config`)
+      }
+    }
+    
+    // Final fallback: use root /api
+    console.log('⚠️ Using fallback /api')
+    return `${currentOrigin}/api`
   }
 
   async init() {
     try {
+      // First, get API base URL from server config
+      this.apiBase = await this.getApiBaseUrl()
+      console.log('🔗 API Base URL:', this.apiBase)
+      
       await this.detectServerMode()
       await this.checkAuthStatus()
       
@@ -121,6 +115,13 @@ class PickleballRankingSystem {
   }
 
   async detectServerMode() {
+    if (!this.apiBase) {
+      console.log('❌ No API base URL, switching to offline mode')
+      this.serverMode = false
+      this.loadFromLocalStorage()
+      return
+    }
+    
     try {
       const response = await fetch(`${this.apiBase}/players`, {
         credentials: 'include',
@@ -132,49 +133,14 @@ class PickleballRankingSystem {
       if (response.ok) {
         this.serverMode = true
         console.log('✅ Server mode detected - using server database')
-        console.log('✅ API base URL confirmed:', this.apiBase)
         return
       } else {
         throw new Error(`Server responded with ${response.status}`)
       }
     } catch (error) {
-      console.log('⚠️ Primary API URL failed:', this.apiBase)
-      console.log('🔄 Trying fallback API URL...')
-      
-      // Try fallback URL - if we tried subpath, try root, and vice versa
-      let fallbackApiBase
-      const currentOrigin = window.location.origin
-      
-      if (this.apiBase.includes('/pickleball/api')) {
-        // We tried pickleball subpath, try root
-        fallbackApiBase = `${currentOrigin}/api`
-      } else {
-        // We tried root, try pickleball subpath
-        fallbackApiBase = `${currentOrigin}/pickleball/api`
-      }
-      
-      try {
-        console.log('🔄 Testing fallback:', fallbackApiBase)
-        const fallbackResponse = await fetch(`${fallbackApiBase}/players`, {
-          credentials: 'include',
-          headers: {
-            'Accept': 'application/json'
-          }
-        })
-        
-        if (fallbackResponse.ok) {
-          this.apiBase = fallbackApiBase
-          this.serverMode = true
-          console.log('✅ Fallback API URL works - updated API base:', this.apiBase)
-          return
-        }
-      } catch (fallbackError) {
-        console.log('❌ Fallback API URL also failed')
-      }
-      
-      console.log('⚠️ No server available, falling back to local storage mode')
+      console.log('❌ Server not available, switching to offline mode')
       this.serverMode = false
-      this.apiBase = null
+      this.loadFromLocalStorage()
     }
   }
 
