@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: pickleball-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-pickleball_ranking}
+      POSTGRES_USER: ${DB_USER:-pickleball_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pickleball_password}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - ./data/postgres-data:/var/lib/postgresql/data
+      - ./data/postgres-init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pickleball_user} -d ${DB_NAME:-pickleball_ranking}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pickleball-network
+    # Health check to ensure the service is running
+
+
+networks:
+  pickleball-network:
+    driver: bridge
