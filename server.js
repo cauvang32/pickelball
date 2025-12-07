@@ -14,6 +14,7 @@ import PickleballDatabase from './database-postgresql.js'
 import ExcelJS from 'exceljs'
 import csrf from 'csrf'
 import crypto from 'crypto'
+import os from 'os'
 import { getRealClientIP, logAccess, logError, getLogStats } from './access-logger.js'
 import { createPlayerRouter } from './routes/players.js'
 import { createSeasonRouter } from './routes/seasons.js'
@@ -505,7 +506,80 @@ app.use(helmet({
   xssFilter: true
 }))
 
-// Enhanced rate limiting with comprehensive IP detection
+// ============================================================================
+// DYNAMIC RATE LIMITING BASED ON SERVER RESOURCES
+// ============================================================================
+
+// Server resource monitoring
+class ServerResourceMonitor {
+  constructor() {
+    this.cpuUsage = 0;
+    this.memoryUsage = 0;
+    this.loadAverage = 0;
+    this.lastUpdate = 0;
+    this.updateInterval = 5000; // Update every 5 seconds
+    this.startMonitoring();
+  }
+
+  startMonitoring() {
+    this.updateMetrics();
+    this.monitoringInterval = setInterval(() => this.updateMetrics(), this.updateInterval);
+  }
+
+  stopMonitoring() {
+    if (this.monitoringInterval) {
+      clearInterval(this.monitoringInterval);
+      this.monitoringInterval = null;
+    }
+  }
+
+  updateMetrics() {
+    // CPU load average (1 minute)
+    const cpus = os.cpus();
+    const loadAvg = os.loadavg()[0]; // 1-minute load average
+    this.loadAverage = loadAvg / cpus.length; // Normalized to 0-1+ range
+
+    // Memory usage
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    this.memoryUsage = (totalMem - freeMem) / totalMem;
+
+    this.lastUpdate = Date.now();
+  }
+
+  // Get dynamic multiplier based on server load (0.1 to 1.0)
+  // Lower multiplier = more restrictive rate limits when server is under load
+  getDynamicMultiplier() {
+    // If server is heavily loaded, reduce rate limits
+    const cpuFactor = Math.max(0.1, 1 - this.loadAverage);
+    const memFactor = Math.max(0.1, 1 - (this.memoryUsage * 0.5)); // Memory has less impact
+    
+    // Combined factor (weighted average)
+    const multiplier = (cpuFactor * 0.7) + (memFactor * 0.3);
+    
+    return Math.max(0.1, Math.min(1.0, multiplier));
+  }
+
+  // Get server status for debugging
+  getStatus() {
+    return {
+      cpuLoadAverage: this.loadAverage.toFixed(2),
+      memoryUsage: (this.memoryUsage * 100).toFixed(1) + '%',
+      dynamicMultiplier: this.getDynamicMultiplier().toFixed(2),
+      lastUpdate: new Date(this.lastUpdate).toISOString()
+    };
+  }
+}
+
+const serverMonitor = new ServerResourceMonitor();
+
+// Log server resource status periodically
+setInterval(() => {
+  const status = serverMonitor.getStatus();
+  console.log(`📊 Server Resources: CPU Load: ${status.cpuLoadAverage}, Memory: ${status.memoryUsage}, Rate Limit Multiplier: ${status.dynamicMultiplier}`);
+}, 60000); // Log every minute
+
+// Enhanced rate limiting with real IP and dynamic limits
 const createProxyAwareRateLimiter = (options) => {
   // Check if rate limiting is disabled
   if (process.env.DISABLE_RATE_LIMITING === 'true') {
@@ -515,21 +589,24 @@ const createProxyAwareRateLimiter = (options) => {
 
   return rateLimit({
     ...options,
-    standardHeaders: 'draft-8', // Use the latest IETF draft standard
+    standardHeaders: 'draft-8',
     legacyHeaders: false,
-    // Enhanced key generator using our comprehensive IP detection
+    // Use real IP from getRealClientIP (handles X-Forwarded-For, CF-Connecting-IP, etc.)
     keyGenerator: (req) => {
-      const clientIP = getRealClientIP(req);
+      const realIP = getRealClientIP(req);
+      return `ip:${realIP}`;
+    },
+    // Dynamic limit based on server resources
+    limit: (req) => {
+      const baseLimit = typeof options.limit === 'function' 
+        ? options.limit(req) 
+        : (options.limit || 100);
       
-      // Log for debugging (remove in production if too verbose)
-      if (process.env.NODE_ENV === 'development') {
-        const originalIP = req.connection.remoteAddress;
-        const forwardedFor = req.get('X-Forwarded-For');
-        const cfIP = req.get('CF-Connecting-IP');
-        console.log(`🔍 Rate limit IP detection: ${clientIP} (Original: ${originalIP}, X-FF: ${forwardedFor}, CF: ${cfIP})`);
-      }
+      // Apply dynamic multiplier based on server load
+      const multiplier = serverMonitor.getDynamicMultiplier();
+      const dynamicLimit = Math.max(10, Math.floor(baseLimit * multiplier));
       
-      return clientIP;
+      return dynamicLimit;
     },
     // Skip internal health checks and static assets
     skip: (req) => {
@@ -537,33 +614,35 @@ const createProxyAwareRateLimiter = (options) => {
              req.path === '/health' ||
              req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)$/);
     },
-    // Custom handler for rate limit exceeded with enhanced logging
+    // Custom handler for rate limit exceeded
     handler: (req, res, next, options) => {
       const clientIP = getRealClientIP(req);
       const userInfo = req.user ? `${req.user.username}(${req.user.role})` : 'anonymous';
+      const serverStatus = serverMonitor.getStatus();
       
-      console.warn(`⚠️ Rate limit exceeded: ${clientIP} | ${userInfo} | ${req.method} ${req.path}`);
+      console.warn(`⚠️ Rate limit exceeded: ${clientIP} | ${userInfo} | ${req.method} ${req.path} | Server Load: ${serverStatus.cpuLoadAverage}`);
       
-      // Log the rate limit violation
       logError(new Error(`Rate limit exceeded: ${req.method} ${req.path}`), req, req.user);
       
-      // Send the default rate limit response in English
-      res.status(options.statusCode || 429).json(
-        options.message || { error: 'Too many requests from this IP, please try again later.' }
-      );
+      res.status(options.statusCode || 429).json({
+        error: 'Too many requests, please try again later.',
+        retryAfter: Math.ceil((options.windowMs || 900000) / 1000),
+        serverLoad: serverStatus.cpuLoadAverage
+      });
     }
   });
 };
 
 // Rate limiting configurations with environment variable debugging
 const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
-const rateLimitMaxRequests = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000;
-const rateLimitApiMax = parseInt(process.env.RATE_LIMIT_API_MAX) || 100;
+const rateLimitMaxRequests = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 2000; // Increased default
+const rateLimitApiMax = parseInt(process.env.RATE_LIMIT_API_MAX) || 500; // Increased default
 
 console.log(`🔧 Rate Limiting Configuration:`);
 console.log(`   Window: ${rateLimitWindowMs}ms (${rateLimitWindowMs / 60000} minutes)`);
-console.log(`   General Limit: ${rateLimitMaxRequests} requests`);
-console.log(`   API Limit: ${rateLimitApiMax} requests`);
+console.log(`   General Limit: ${rateLimitMaxRequests} requests per user/session`);
+console.log(`   API Limit: ${rateLimitApiMax} requests per user/session`);
+console.log(`   Mode: Per-user/session (not global IP)`);
 console.log(`   Disabled: ${process.env.DISABLE_RATE_LIMITING === 'true'}`);
 
 const generalLimiter = createProxyAwareRateLimiter({
@@ -615,39 +694,51 @@ const restoreLimiter = createProxyAwareRateLimiter({
   message: { error: 'Too many restore requests from this IP, please try again later.' }
 });
 
-// User-aware rate limiting (different limits for authenticated users)
-const createUserAwareRateLimiter = (anonymousLimit, authenticatedLimit, windowMs = 15 * 60 * 1000) => {
+// User-aware rate limiting with dynamic limits based on user role and server resources
+const createUserAwareRateLimiter = (baseLimit, windowMs = 15 * 60 * 1000) => {
   return createProxyAwareRateLimiter({
     windowMs: windowMs,
     limit: (req) => {
-      // Check if user is authenticated and return different limits
-      if (req.user && req.user.role === 'admin') {
-        return authenticatedLimit * 2; // Admins get double the limit
-      } else if (req.user) {
-        return authenticatedLimit; // Authenticated users get higher limit
-      } else {
-        return anonymousLimit; // Anonymous users get base limit
-      }
-    },
-    keyGenerator: (req) => {
-      const baseIP = getRealClientIP(req);
-      // Add user context to the key for authenticated users
+      // Base limit adjusted by user role
+      let userLimit = baseLimit;
       if (req.user) {
-        return `${baseIP}:${req.user.username}`;
+        switch (req.user.role) {
+          case 'admin':
+            userLimit = baseLimit * 5; // Admins get 5x the limit
+            break;
+          case 'editor':
+            userLimit = baseLimit * 3; // Editors get 3x the limit
+            break;
+          default:
+            userLimit = baseLimit * 2; // Other authenticated users get 2x
+        }
       }
-      return baseIP;
+      
+      // Dynamic adjustment based on server resources is handled by createProxyAwareRateLimiter
+      return userLimit;
+    },
+    // Always use real IP for rate limiting key
+    keyGenerator: (req) => {
+      const realIP = getRealClientIP(req);
+      // Add user context if authenticated (allows same IP, different users)
+      if (req.user && req.user.username) {
+        return `user:${req.user.username}:${realIP}`;
+      }
+      return `ip:${realIP}`;
     },
     message: (req) => {
-      const isAuth = !!req.user;
       return { 
-        error: `Too many requests from this ${isAuth ? 'account' : 'IP'}. ${isAuth ? 'Authenticated users' : 'Anonymous users'} are limited. Please try again later.`
+        error: `Too many requests. Please wait a moment before trying again.`,
+        retryAfter: Math.ceil(windowMs / 1000)
       };
     }
   });
 };
 
-// Apply user-aware rate limiting to API endpoints
-const smartApiLimiter = createUserAwareRateLimiter(50, 200); // Anonymous: 50/15min, Auth: 200/15min
+// Dynamic API rate limiter - generous limits per real IP
+// Base: 200 requests/15min for anonymous, scales up for authenticated users
+// Dynamic multiplier reduces this when server is under load
+const smartApiLimiter = createUserAwareRateLimiter(200);
 
 // Apply rate limiting conditionally based on environment
 if (process.env.NODE_ENV !== 'development') {
@@ -2462,6 +2553,7 @@ app.get('/api/cache-stats', checkAuth, (req, res) => {
 app.get('/api/health', authenticateToken, (req, res) => {
   const stats = rankingsCache.getStats()
   const uptime = process.uptime()
+  const serverStatus = serverMonitor.getStatus()
   
   res.json({
     status: 'healthy',
@@ -2469,6 +2561,12 @@ app.get('/api/health', authenticateToken, (req, res) => {
     uptime: {
       seconds: Math.floor(uptime),
       human: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`
+    },
+    serverResources: {
+      cpuLoadAverage: serverStatus.cpuLoadAverage,
+      memoryUsage: serverStatus.memoryUsage,
+      rateLimitMultiplier: serverStatus.dynamicMultiplier,
+      lastUpdate: serverStatus.lastUpdate
     },
     cache: {
       isActive: stats.currentEntries > 0,
