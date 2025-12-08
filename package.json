@@ -22,7 +22,7 @@
   "devDependencies": {
     "axios": "^1.13.2",
     "concurrently": "^8.2.2",
-    "vite": "^6.3.6"
+    "vite": "^7.2.7"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
