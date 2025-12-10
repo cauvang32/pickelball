@@ -21,6 +21,7 @@ import { createSeasonRouter } from './routes/seasons.js'
 import { createMatchRouter } from './routes/matches.js'
 import { createRankingRouter } from './routes/rankings.js'
 import { createExportRouter } from './routes/export.js'
+import { createUserRouter } from './routes/users.js'
 
 // Load environment variables
 dotenv.config()
@@ -510,14 +511,26 @@ app.use(helmet({
 // DYNAMIC RATE LIMITING BASED ON SERVER RESOURCES
 // ============================================================================
 
-// Server resource monitoring
+// Server resource monitoring with smarter thresholds
 class ServerResourceMonitor {
   constructor() {
     this.cpuUsage = 0;
     this.memoryUsage = 0;
     this.loadAverage = 0;
     this.lastUpdate = 0;
-    this.updateInterval = 5000; // Update every 5 seconds
+    this.updateInterval = 10000; // Update every 10 seconds (less frequent)
+    this.cpuCount = os.cpus().length;
+    
+    // Configurable thresholds from environment - only start reducing limits when these are exceeded
+    this.thresholds = {
+      // CPU: Only reduce limits when load is > threshold
+      cpuWarning: parseFloat(process.env.RATE_LIMIT_CPU_WARNING) || 0.7,    // Start gentle reduction at 70%
+      cpuCritical: parseFloat(process.env.RATE_LIMIT_CPU_CRITICAL) || 0.9,   // More aggressive at 90%
+      // Memory: Only reduce limits when memory usage > threshold
+      memoryWarning: parseFloat(process.env.RATE_LIMIT_MEMORY_WARNING) || 0.8,   // Start at 80%
+      memoryCritical: parseFloat(process.env.RATE_LIMIT_MEMORY_CRITICAL) || 0.95, // Critical at 95%
+    };
+    
     this.startMonitoring();
   }
 
@@ -534,12 +547,13 @@ class ServerResourceMonitor {
   }
 
   updateMetrics() {
-    // CPU load average (1 minute)
-    const cpus = os.cpus();
-    const loadAvg = os.loadavg()[0]; // 1-minute load average
-    this.loadAverage = loadAvg / cpus.length; // Normalized to 0-1+ range
+    // CPU load average (1 minute) - normalized by CPU count
+    const loadAvg = os.loadavg()[0];
+    // Normalized: 1.0 means 100% of all CPUs utilized
+    // Values > 1.0 mean overloaded, < 1.0 means resources available
+    this.loadAverage = loadAvg / this.cpuCount;
 
-    // Memory usage
+    // Memory usage (0-1 range)
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     this.memoryUsage = (totalMem - freeMem) / totalMem;
@@ -547,25 +561,61 @@ class ServerResourceMonitor {
     this.lastUpdate = Date.now();
   }
 
-  // Get dynamic multiplier based on server load (0.1 to 1.0)
-  // Lower multiplier = more restrictive rate limits when server is under load
+  // Smarter dynamic multiplier with grace zones
+  // Returns 1.0 when resources are fine, reduces only under real load
   getDynamicMultiplier() {
-    // If server is heavily loaded, reduce rate limits
-    const cpuFactor = Math.max(0.1, 1 - this.loadAverage);
-    const memFactor = Math.max(0.1, 1 - (this.memoryUsage * 0.5)); // Memory has less impact
+    let multiplier = 1.0;
     
-    // Combined factor (weighted average)
-    const multiplier = (cpuFactor * 0.7) + (memFactor * 0.3);
+    // CPU factor - only reduce if above warning threshold
+    if (this.loadAverage > this.thresholds.cpuCritical) {
+      // Critical: reduce to 30-50% of normal limits
+      multiplier *= 0.3 + (0.2 * (1 - Math.min(1, (this.loadAverage - this.thresholds.cpuCritical) / 0.5)));
+    } else if (this.loadAverage > this.thresholds.cpuWarning) {
+      // Warning: gradual reduction from 100% to 50%
+      const warningRange = this.thresholds.cpuCritical - this.thresholds.cpuWarning;
+      const loadInRange = (this.loadAverage - this.thresholds.cpuWarning) / warningRange;
+      multiplier *= 1 - (loadInRange * 0.5); // 1.0 -> 0.5
+    }
+    // Below warning threshold: no CPU-based reduction (multiplier stays 1.0)
     
-    return Math.max(0.1, Math.min(1.0, multiplier));
+    // Memory factor - only reduce if above warning threshold
+    if (this.memoryUsage > this.thresholds.memoryCritical) {
+      // Critical memory: reduce to 40% of current multiplier
+      multiplier *= 0.4;
+    } else if (this.memoryUsage > this.thresholds.memoryWarning) {
+      // Warning: gradual reduction from 100% to 60%
+      const warningRange = this.thresholds.memoryCritical - this.thresholds.memoryWarning;
+      const memInRange = (this.memoryUsage - this.thresholds.memoryWarning) / warningRange;
+      multiplier *= 1 - (memInRange * 0.4); // 1.0 -> 0.6
+    }
+    // Below warning threshold: no memory-based reduction
+    
+    // Ensure minimum of 20% and maximum of 100%
+    return Math.max(0.2, Math.min(1.0, multiplier));
+  }
+
+  // Get human-readable status
+  getLoadStatus() {
+    if (this.loadAverage > this.thresholds.cpuCritical || this.memoryUsage > this.thresholds.memoryCritical) {
+      return 'CRITICAL';
+    } else if (this.loadAverage > this.thresholds.cpuWarning || this.memoryUsage > this.thresholds.memoryWarning) {
+      return 'WARNING';
+    }
+    return 'NORMAL';
   }
 
   // Get server status for debugging
   getStatus() {
+    const multiplier = this.getDynamicMultiplier();
     return {
       cpuLoadAverage: this.loadAverage.toFixed(2),
+      cpuLoadPercent: (this.loadAverage * 100).toFixed(0) + '%',
       memoryUsage: (this.memoryUsage * 100).toFixed(1) + '%',
-      dynamicMultiplier: this.getDynamicMultiplier().toFixed(2),
+      memoryFreeGB: (os.freemem() / (1024 * 1024 * 1024)).toFixed(2) + 'GB',
+      dynamicMultiplier: multiplier.toFixed(2),
+      effectiveMultiplierPercent: (multiplier * 100).toFixed(0) + '%',
+      loadStatus: this.getLoadStatus(),
+      cpuCount: this.cpuCount,
       lastUpdate: new Date(this.lastUpdate).toISOString()
     };
   }
@@ -573,10 +623,18 @@ class ServerResourceMonitor {
 
 const serverMonitor = new ServerResourceMonitor();
 
-// Log server resource status periodically
+// Log server resource status periodically (only when not NORMAL)
 setInterval(() => {
   const status = serverMonitor.getStatus();
-  console.log(`📊 Server Resources: CPU Load: ${status.cpuLoadAverage}, Memory: ${status.memoryUsage}, Rate Limit Multiplier: ${status.dynamicMultiplier}`);
+  // Always log but with different levels
+  if (status.loadStatus === 'CRITICAL') {
+    console.warn(`🔴 Server Resources [${status.loadStatus}]: CPU: ${status.cpuLoadPercent}, Memory: ${status.memoryUsage} (${status.memoryFreeGB} free), Rate Limit: ${status.effectiveMultiplierPercent}`);
+  } else if (status.loadStatus === 'WARNING') {
+    console.log(`🟡 Server Resources [${status.loadStatus}]: CPU: ${status.cpuLoadPercent}, Memory: ${status.memoryUsage} (${status.memoryFreeGB} free), Rate Limit: ${status.effectiveMultiplierPercent}`);
+  } else {
+    // Normal status - log less frequently by checking time
+    console.log(`🟢 Server Resources [${status.loadStatus}]: CPU: ${status.cpuLoadPercent}, Memory: ${status.memoryUsage} (${status.memoryFreeGB} free), Rate Limit: ${status.effectiveMultiplierPercent}`);
+  }
 }, 60000); // Log every minute
 
 // Enhanced rate limiting with real IP and dynamic limits
@@ -1236,7 +1294,7 @@ app.post('/api/auth/login',
     try {
       const { username, password } = req.body
 
-      // Check if credentials match admin account
+      // Check if credentials match admin account from .env
       let user = null
       if (username === ADMIN_USERNAME) {
         const isValidPassword = await bcrypt.compare(password, hashedAdminPassword)
@@ -1256,6 +1314,22 @@ app.post('/api/auth/login',
             username: EDITOR_USERNAME,
             email: EDITOR_EMAIL,
             role: 'editor'
+          }
+        }
+      } else {
+        // Check database users
+        const dbUser = await db.getUserByUsername(username)
+        if (dbUser && dbUser.is_active) {
+          const isValidPassword = await bcrypt.compare(password, dbUser.password_hash)
+          if (isValidPassword) {
+            user = {
+              id: dbUser.id,
+              username: dbUser.username,
+              email: dbUser.email,
+              role: dbUser.role
+            }
+            // Update last login
+            await db.updateUserLastLogin(dbUser.id)
           }
         }
       }
@@ -1430,6 +1504,16 @@ app.use('/api/export-excel', createExportRouter({
   authenticateToken,
   conditionalRateLimit,
   exportLimiter
+}))
+
+app.use('/api/users', createUserRouter({
+  db,
+  authenticateToken,
+  requireAdmin,
+  conditionalRateLimit,
+  createLimiter,
+  deleteLimiter,
+  handleValidationErrors
 }))
 
 // Players Routes

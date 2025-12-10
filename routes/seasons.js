@@ -183,5 +183,83 @@ export const createSeasonRouter = ({
     })
   )
 
+  // ============================================================================
+  // SEASON PLAYERS MANAGEMENT
+  // ============================================================================
+
+  // Get players in a season
+  router.get(
+    '/:id/players',
+    checkAuth,
+    [param('id').isInt().withMessage('Invalid season ID')],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
+      const seasonId = parseInt(req.params.id)
+      const players = await db.getSeasonPlayers(seasonId)
+      res.json(players)
+    })
+  )
+
+  // Set players for a season (replaces all existing)
+  router.put(
+    '/:id/players',
+    authenticateToken,
+    requireAdmin,
+    [
+      param('id').isInt().withMessage('Invalid season ID'),
+      body('playerIds').isArray().withMessage('playerIds must be an array'),
+      body('playerIds.*').isInt().withMessage('Each player ID must be an integer')
+    ],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
+      const seasonId = parseInt(req.params.id)
+      const { playerIds } = req.body
+      
+      await db.setSeasonPlayers(seasonId, playerIds)
+      rankingsCache.clear()
+      setTimeout(() => rankingsCache.preloadCommonData(db), 100)
+      
+      res.json({ success: true, message: 'Season players updated successfully' })
+    })
+  )
+
+  // Add a player to a season
+  router.post(
+    '/:id/players/:playerId',
+    authenticateToken,
+    requireAdmin,
+    [
+      param('id').isInt().withMessage('Invalid season ID'),
+      param('playerId').isInt().withMessage('Invalid player ID')
+    ],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
+      const seasonId = parseInt(req.params.id)
+      const playerId = parseInt(req.params.playerId)
+      
+      await db.addPlayerToSeason(seasonId, playerId)
+      res.json({ success: true, message: 'Player added to season' })
+    })
+  )
+
+  // Remove a player from a season
+  router.delete(
+    '/:id/players/:playerId',
+    authenticateToken,
+    requireAdmin,
+    [
+      param('id').isInt().withMessage('Invalid season ID'),
+      param('playerId').isInt().withMessage('Invalid player ID')
+    ],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
+      const seasonId = parseInt(req.params.id)
+      const playerId = parseInt(req.params.playerId)
+      
+      await db.removePlayerFromSeason(seasonId, playerId)
+      res.json({ success: true, message: 'Player removed from season' })
+    })
+  )
+
   return router
 }

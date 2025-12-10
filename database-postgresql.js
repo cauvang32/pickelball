@@ -130,6 +130,32 @@ class PickleballDatabasePostgreSQL {
         END $$;
       `)
 
+      // Season players table - tracks which players participate in each season
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS season_players (
+          id SERIAL PRIMARY KEY,
+          season_id INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+          player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+          joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(season_id, player_id)
+        )
+      `)
+
+      // Users table - for admin/editor authentication
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(255) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          email VARCHAR(255),
+          role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'editor')),
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(255),
+          last_login TIMESTAMP
+        )
+      `)
+
       // Create indexes for better performance
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_matches_play_date ON matches(play_date);
@@ -139,6 +165,15 @@ class PickleballDatabasePostgreSQL {
       `)
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_seasons_active ON seasons(is_active);
+      `)
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_season_players_season ON season_players(season_id);
+      `)
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_season_players_player ON season_players(player_id);
+      `)
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
       `)
 
       await client.query('COMMIT')
@@ -695,6 +730,126 @@ class PickleballDatabasePostgreSQL {
     return result.rows
   }
 
+  // ============================================================================
+  // SEASON PLAYERS MANAGEMENT
+  // ============================================================================
+
+  async getSeasonPlayers(seasonId) {
+    const result = await this.query(`
+      SELECT p.id, p.name, sp.joined_at
+      FROM season_players sp
+      JOIN players p ON sp.player_id = p.id
+      WHERE sp.season_id = $1
+      ORDER BY p.name
+    `, [seasonId])
+    return result.rows
+  }
+
+  async addPlayerToSeason(seasonId, playerId) {
+    try {
+      await this.query(`
+        INSERT INTO season_players (season_id, player_id)
+        VALUES ($1, $2)
+        ON CONFLICT (season_id, player_id) DO NOTHING
+      `, [seasonId, playerId])
+      return true
+    } catch (error) {
+      console.error('Error adding player to season:', error)
+      return false
+    }
+  }
+
+  async removePlayerFromSeason(seasonId, playerId) {
+    await this.query(`
+      DELETE FROM season_players
+      WHERE season_id = $1 AND player_id = $2
+    `, [seasonId, playerId])
+  }
+
+  async setSeasonPlayers(seasonId, playerIds) {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      
+      // Remove all existing players from season
+      await client.query('DELETE FROM season_players WHERE season_id = $1', [seasonId])
+      
+      // Add new players
+      for (const playerId of playerIds) {
+        await client.query(`
+          INSERT INTO season_players (season_id, player_id)
+          VALUES ($1, $2)
+        `, [seasonId, playerId])
+      }
+      
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  // ============================================================================
+  // USER MANAGEMENT
+  // ============================================================================
+
+  async getUsers() {
+    const result = await this.query(`
+      SELECT id, username, email, role, is_active, created_at, created_by, last_login
+      FROM users
+      ORDER BY created_at DESC
+    `)
+    return result.rows
+  }
+
+  async getUserByUsername(username) {
+    const result = await this.query(`
+      SELECT id, username, password_hash, email, role, is_active, created_at, last_login
+      FROM users
+      WHERE username = $1
+    `, [username])
+    return result.rows[0] || null
+  }
+
+  async createUser(username, passwordHash, email, role, createdBy) {
+    const result = await this.query(`
+      INSERT INTO users (username, password_hash, email, role, created_by)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
+    `, [username, passwordHash, email, role, createdBy])
+    return result.rows[0].id
+  }
+
+  async updateUser(userId, username, email, role, isActive) {
+    await this.query(`
+      UPDATE users
+      SET username = $1, email = $2, role = $3, is_active = $4
+      WHERE id = $5
+    `, [username, email, role, isActive, userId])
+  }
+
+  async updateUserPassword(userId, passwordHash) {
+    await this.query(`
+      UPDATE users
+      SET password_hash = $1
+      WHERE id = $2
+    `, [passwordHash, userId])
+  }
+
+  async deleteUser(userId) {
+    await this.query('DELETE FROM users WHERE id = $1', [userId])
+  }
+
+  async updateUserLastLogin(userId) {
+    await this.query(`
+      UPDATE users
+      SET last_login = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [userId])
+  }
+
   async clearAllData() {
     const client = await this.pool.connect()
     try {
@@ -702,13 +857,16 @@ class PickleballDatabasePostgreSQL {
       
       // Clear all tables in the correct order (respecting foreign key constraints)
       await client.query('DELETE FROM matches')
+      await client.query('DELETE FROM season_players')
       await client.query('DELETE FROM seasons')
       await client.query('DELETE FROM players')
+      // Don't delete users - they should persist
       
       // Reset sequences (PostgreSQL equivalent of SQLite's auto-increment reset)
       await client.query('ALTER SEQUENCE players_id_seq RESTART WITH 1')
       await client.query('ALTER SEQUENCE seasons_id_seq RESTART WITH 1')
       await client.query('ALTER SEQUENCE matches_id_seq RESTART WITH 1')
+      await client.query('ALTER SEQUENCE season_players_id_seq RESTART WITH 1')
       
       await client.query('COMMIT')
       console.log('🗑️ All data cleared from PostgreSQL database')

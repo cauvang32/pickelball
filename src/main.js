@@ -649,6 +649,14 @@ class PickleballRankingSystem {
         })
       }
 
+      // User management
+      const addUserBtn = document.getElementById('addUser')
+      if (addUserBtn) {
+        addUserBtn.addEventListener('click', () => {
+          this.showUserModal()
+        })
+      }
+
       // Clear all data button
       const clearAllDataBtn = document.getElementById('clearAllData')
       if (clearAllDataBtn) {
@@ -765,6 +773,8 @@ class PickleballRankingSystem {
       this.renderPlayers()
     } else if (tabName === 'seasons') {
       this.renderSeasons()
+    } else if (tabName === 'users') {
+      this.renderUsers()
     }
   }
 
@@ -1189,6 +1199,253 @@ class PickleballRankingSystem {
     }
   }
 
+  // User management methods
+  async renderUsers() {
+    try {
+      const container = document.getElementById('usersList')
+      if (!container) {
+        console.warn('Users list container not found')
+        return
+      }
+
+      // Fetch users from API
+      const response = await this.makeAuthenticatedRequest(`${this.apiBase}/users`, { method: 'GET' })
+      if (!response.ok) {
+        container.innerHTML = `<div class="error-state"><p>❌ Không thể tải danh sách tài khoản</p></div>`
+        return
+      }
+
+      const users = await response.json()
+      
+      if (users.length === 0) {
+        container.innerHTML = `<div class="empty-state"><p>📋 Chưa có tài khoản nào được tạo.</p></div>`
+        return
+      }
+
+      let html = `<div class="users-table-container">
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>Tên đăng nhập</th>
+              <th>Vai trò</th>
+              <th>Nguồn</th>
+              <th>Ngày tạo</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>`
+
+      users.forEach(user => {
+        const isEnvUser = user.source === 'env'
+        const roleLabel = user.role === 'admin' ? '👑 Admin' : '✏️ Editor'
+        const sourceLabel = isEnvUser ? '🔒 Hệ thống (.env)' : '📝 Database'
+        const createdAt = user.created_at ? new Date(user.created_at).toLocaleDateString('vi-VN') : 'N/A'
+
+        html += `
+          <tr class="${isEnvUser ? 'env-user' : ''}">
+            <td><strong>${user.username}</strong></td>
+            <td><span class="role-badge role-${user.role}">${roleLabel}</span></td>
+            <td>${sourceLabel}</td>
+            <td>${createdAt}</td>
+            <td>
+              ${!isEnvUser ? `
+                <button class="edit-btn small-btn" data-action="edit-user" data-id="${user.id}">✏️</button>
+                <button class="delete-btn small-btn" data-action="delete-user" data-id="${user.id}" data-username="${user.username}">🗑️</button>
+              ` : `<span class="text-muted">Không thể sửa</span>`}
+            </td>
+          </tr>`
+      })
+
+      html += `</tbody></table></div>`
+      container.innerHTML = html
+
+      // Add event listeners for user actions
+      container.querySelectorAll('[data-action]').forEach(button => {
+        button.addEventListener('click', (e) => {
+          const action = e.target.dataset.action
+          const userId = e.target.dataset.id
+          const username = e.target.dataset.username
+
+          if (action === 'edit-user') {
+            this.showUserModal(parseInt(userId))
+          } else if (action === 'delete-user') {
+            this.deleteUser(parseInt(userId), username)
+          }
+        })
+      })
+    } catch (error) {
+      console.error('Error rendering users:', error)
+    }
+  }
+
+  showUserModal(userId = null) {
+    const isEdit = userId !== null
+    const title = isEdit ? 'Sửa tài khoản' : 'Thêm tài khoản mới'
+    
+    const modal = document.createElement('div')
+    modal.className = 'modal-overlay'
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>${title}</h3>
+          <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="modalUsername">Tên đăng nhập *</label>
+            <input type="text" id="modalUsername" placeholder="Nhập tên đăng nhập" ${isEdit ? 'disabled' : ''} required>
+          </div>
+          <div class="form-group">
+            <label for="modalPassword">${isEdit ? 'Mật khẩu mới (để trống nếu không đổi)' : 'Mật khẩu *'}</label>
+            <input type="password" id="modalPassword" placeholder="Nhập mật khẩu" ${isEdit ? '' : 'required'}>
+          </div>
+          <div class="form-group">
+            <label for="modalRole">Vai trò *</label>
+            <select id="modalRole" required>
+              <option value="editor">✏️ Editor - Có thể thêm/sửa trận đấu</option>
+              <option value="admin">👑 Admin - Toàn quyền quản lý</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="cancel-btn">Hủy</button>
+          <button class="save-btn">${isEdit ? 'Cập nhật' : 'Tạo tài khoản'}</button>
+        </div>
+      </div>
+    `
+
+    document.body.appendChild(modal)
+
+    // If editing, load existing user data
+    if (isEdit) {
+      this.loadUserForEdit(userId, modal)
+    }
+
+    // Event handlers
+    const closeModal = () => modal.remove()
+    modal.querySelector('.close-modal').addEventListener('click', closeModal)
+    modal.querySelector('.cancel-btn').addEventListener('click', closeModal)
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal()
+    })
+
+    modal.querySelector('.save-btn').addEventListener('click', async () => {
+      const username = modal.querySelector('#modalUsername').value.trim()
+      const password = modal.querySelector('#modalPassword').value
+      const role = modal.querySelector('#modalRole').value
+
+      if (!username) {
+        alert('Vui lòng nhập tên đăng nhập')
+        return
+      }
+
+      if (!isEdit && !password) {
+        alert('Vui lòng nhập mật khẩu')
+        return
+      }
+
+      if (password && password.length < 6) {
+        alert('Mật khẩu phải có ít nhất 6 ký tự')
+        return
+      }
+
+      try {
+        if (isEdit) {
+          await this.updateUser(userId, { password: password || undefined, role })
+        } else {
+          await this.createUser({ username, password, role })
+        }
+        closeModal()
+        this.renderUsers()
+      } catch (error) {
+        alert(`Lỗi: ${error.message}`)
+      }
+    })
+  }
+
+  async loadUserForEdit(userId, modal) {
+    try {
+      const response = await this.makeAuthenticatedRequest(`${this.apiBase}/users`, { method: 'GET' })
+      if (response.ok) {
+        const users = await response.json()
+        const user = users.find(u => u.id === userId)
+        if (user) {
+          modal.querySelector('#modalUsername').value = user.username
+          modal.querySelector('#modalRole').value = user.role
+        }
+      }
+    } catch (error) {
+      console.error('Error loading user:', error)
+    }
+  }
+
+  async createUser(userData) {
+    const response = await this.makeAuthenticatedRequest(`${this.apiBase}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData)
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || 'Không thể tạo tài khoản')
+    }
+
+    this.showNotification('✅ Tạo tài khoản thành công', 'success')
+  }
+
+  async updateUser(userId, userData) {
+    // Update password separately if provided
+    if (userData.password) {
+      const pwdResponse = await this.makeAuthenticatedRequest(`${this.apiBase}/users/${userId}/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: userData.password })
+      })
+
+      if (!pwdResponse.ok) {
+        const error = await pwdResponse.json()
+        throw new Error(error.error || 'Không thể cập nhật mật khẩu')
+      }
+    }
+
+    // Update other fields (role, etc.)
+    const response = await this.makeAuthenticatedRequest(`${this.apiBase}/users/${userId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: userData.role })
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || 'Không thể cập nhật tài khoản')
+    }
+
+    this.showNotification('✅ Cập nhật tài khoản thành công', 'success')
+  }
+
+  async deleteUser(userId, username) {
+    if (!confirm(`Bạn có chắc muốn xóa tài khoản "${username}"?`)) {
+      return
+    }
+
+    try {
+      const response = await this.makeAuthenticatedRequest(`${this.apiBase}/users/${userId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Không thể xóa tài khoản')
+      }
+
+      this.showNotification('✅ Xóa tài khoản thành công', 'success')
+      this.renderUsers()
+    } catch (error) {
+      alert(`Lỗi: ${error.message}`)
+    }
+  }
+
   async renderRankings() {
     let rankings = []
     
@@ -1423,14 +1680,29 @@ class PickleballRankingSystem {
     }
   }
 
-  showSeasonModal(seasonId = null) {
+  async showSeasonModal(seasonId = null) {
     const isEdit = seasonId !== null
     const season = isEdit ? this.seasons.find(s => s.id === seasonId) : null
+    
+    // Load season players if editing
+    let seasonPlayers = []
+    if (isEdit) {
+      try {
+        const response = await this.makeAuthenticatedRequest(`${this.apiBase}/seasons/${seasonId}/players`)
+        if (response.ok) {
+          seasonPlayers = await response.json()
+        }
+      } catch (error) {
+        console.error('Error loading season players:', error)
+      }
+    }
+    
+    const seasonPlayerIds = seasonPlayers.map(p => p.id)
     
     const modal = document.createElement('div')
     modal.className = 'modal'
     modal.innerHTML = `
-      <div class="modal-content">
+      <div class="modal-content modal-content-large">
         <h2>${isEdit ? 'Chỉnh sửa mùa giải' : 'Tạo mùa giải mới'}</h2>
         <form id="seasonForm">
           <div class="form-group">
@@ -1441,22 +1713,41 @@ class PickleballRankingSystem {
             <label for="seasonDescription">Mô tả (tuỳ chọn):</label>
             <textarea id="seasonDescription" rows="2" placeholder="Mô tả về mùa giải...">${season ? season.description || '' : ''}</textarea>
           </div>
-          <div class="form-group">
-            <label for="seasonStartDate">Ngày bắt đầu:</label>
-            <input type="date" id="seasonStartDate" value="${season ? season.start_date : ''}" required>
-          </div>
-          <div class="form-group">
-            <label for="seasonEndDate">Ngày kết thúc (tuỳ chọn):</label>
-            <input type="date" id="seasonEndDate" value="${season ? season.end_date || '' : ''}">
-            <small>Nếu để trống, mùa giải sẽ không tự động kết thúc</small>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="seasonStartDate">Ngày bắt đầu:</label>
+              <input type="date" id="seasonStartDate" value="${season ? season.start_date : ''}" required>
+            </div>
+            <div class="form-group">
+              <label for="seasonEndDate">Ngày kết thúc (tuỳ chọn):</label>
+              <input type="date" id="seasonEndDate" value="${season ? season.end_date || '' : ''}">
+            </div>
           </div>
           <div class="form-group">
             <label>
               <input type="checkbox" id="seasonAutoEnd" ${season && season.auto_end ? 'checked' : ''}>
               Tự động kết thúc vào ngày kết thúc
             </label>
-            <small>Nếu bật, mùa giải sẽ tự động kết thúc khi đến ngày kết thúc</small>
           </div>
+          
+          <div class="form-group season-players-section">
+            <label>Thành viên tham gia giải:</label>
+            <div class="player-selection-controls">
+              <button type="button" id="selectAllPlayers" class="small-btn">✓ Chọn tất cả</button>
+              <button type="button" id="deselectAllPlayers" class="small-btn">✗ Bỏ chọn tất cả</button>
+              <span class="selected-count">Đã chọn: <strong id="selectedPlayerCount">0</strong>/${this.players.length}</span>
+            </div>
+            <div class="player-checkbox-list" id="playerCheckboxList">
+              ${this.players.map(player => `
+                <label class="player-checkbox-item">
+                  <input type="checkbox" name="seasonPlayers" value="${player.id}" 
+                    ${seasonPlayerIds.includes(player.id) ? 'checked' : ''}>
+                  <span>${player.name}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          
           <div class="form-actions">
             <button type="submit">${isEdit ? 'Cập nhật' : 'Tạo mùa giải'}</button>
             <button type="button" id="cancelSeason">Hủy</button>
@@ -1468,6 +1759,30 @@ class PickleballRankingSystem {
     
     document.body.appendChild(modal)
     
+    // Update selected count
+    const updateSelectedCount = () => {
+      const checked = modal.querySelectorAll('input[name="seasonPlayers"]:checked').length
+      document.getElementById('selectedPlayerCount').textContent = checked
+    }
+    updateSelectedCount()
+    
+    // Player checkbox change handler
+    modal.querySelectorAll('input[name="seasonPlayers"]').forEach(cb => {
+      cb.addEventListener('change', updateSelectedCount)
+    })
+    
+    // Select all button
+    document.getElementById('selectAllPlayers').addEventListener('click', () => {
+      modal.querySelectorAll('input[name="seasonPlayers"]').forEach(cb => cb.checked = true)
+      updateSelectedCount()
+    })
+    
+    // Deselect all button
+    document.getElementById('deselectAllPlayers').addEventListener('click', () => {
+      modal.querySelectorAll('input[name="seasonPlayers"]').forEach(cb => cb.checked = false)
+      updateSelectedCount()
+    })
+    
     document.getElementById('seasonForm').addEventListener('submit', async (e) => {
       e.preventDefault()
       const name = document.getElementById('seasonName').value.trim()
@@ -1476,6 +1791,10 @@ class PickleballRankingSystem {
       const endDate = document.getElementById('seasonEndDate').value || null
       const autoEnd = document.getElementById('seasonAutoEnd').checked
       const errorDiv = document.getElementById('seasonError')
+      
+      // Get selected players
+      const selectedPlayerIds = Array.from(modal.querySelectorAll('input[name="seasonPlayers"]:checked'))
+        .map(cb => parseInt(cb.value))
       
       if (!name || !startDate) {
         errorDiv.textContent = 'Vui lòng điền đầy đủ thông tin'
@@ -1495,8 +1814,8 @@ class PickleballRankingSystem {
       }
       
       const result = isEdit ? 
-        await this.updateSeason(seasonId, name, description, startDate, endDate, autoEnd) :
-        await this.createSeason(name, description, startDate, endDate, autoEnd)
+        await this.updateSeason(seasonId, name, description, startDate, endDate, autoEnd, selectedPlayerIds) :
+        await this.createSeason(name, description, startDate, endDate, autoEnd, selectedPlayerIds)
       
       if (result.success) {
         document.body.removeChild(modal)
@@ -1517,7 +1836,7 @@ class PickleballRankingSystem {
     })
   }
 
-  async createSeason(name, description, startDate, endDate, autoEnd) {
+  async createSeason(name, description, startDate, endDate, autoEnd, playerIds = []) {
     try {
       const response = await this.makeAuthenticatedRequest(`${this.apiBase}/seasons`, {
         method: 'POST',
@@ -1533,6 +1852,14 @@ class PickleballRankingSystem {
       const data = await response.json()
       
       if (response.ok) {
+        // Update season players if any selected
+        if (playerIds.length > 0) {
+          await this.makeAuthenticatedRequest(`${this.apiBase}/seasons/${data.id}/players`, {
+            method: 'PUT',
+            body: JSON.stringify({ playerIds })
+          })
+        }
+        
         await this.loadSeasons()
         this.renderSeasons()
         this.updateSeasonSelector()
@@ -1546,7 +1873,7 @@ class PickleballRankingSystem {
     }
   }
 
-  async updateSeason(seasonId, name, description, startDate, endDate, autoEnd) {
+  async updateSeason(seasonId, name, description, startDate, endDate, autoEnd, playerIds = []) {
     try {
       const response = await this.makeAuthenticatedRequest(`${this.apiBase}/seasons/${seasonId}`, {
         method: 'PUT',
@@ -1556,6 +1883,12 @@ class PickleballRankingSystem {
       const data = await response.json()
       
       if (response.ok) {
+        // Update season players
+        await this.makeAuthenticatedRequest(`${this.apiBase}/seasons/${seasonId}/players`, {
+          method: 'PUT',
+          body: JSON.stringify({ playerIds })
+        })
+        
         await this.loadSeasons()
         this.renderSeasons()
         this.updateSeasonSelector()
