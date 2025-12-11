@@ -41,13 +41,15 @@ export const createSeasonRouter = ({
       body('startDate').isISO8601().withMessage('Valid start date is required'),
       body('endDate').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
       body('autoEnd').optional().isBoolean().withMessage('autoEnd must be boolean'),
-      body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string')
+      body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string'),
+      body('loseMoney').optional().isInt({ min: 0 }).withMessage('Lose money must be a non-negative integer')
     ],
     handleValidationErrors,
     asyncHandler(async (req, res) => {
-      let { name, startDate, endDate, autoEnd = false, description = '' } = req.body
+      let { name, startDate, endDate, autoEnd = false, description = '', loseMoney = 0 } = req.body
       endDate = endDate || null
       description = description || ''
+      loseMoney = parseInt(loseMoney) || 0
 
       if (autoEnd && !endDate) {
         res.status(400).json({ success: false, error: 'Auto-end requires an end date to be set' })
@@ -59,11 +61,11 @@ export const createSeasonRouter = ({
         console.log(`🏁 Auto-ended ${expiredSeasons.length} expired season(s)`)
       }
 
-      const seasonId = await db.createSeason(name, startDate, endDate, autoEnd, description)
+      const seasonId = await db.createSeason(name, startDate, endDate, autoEnd, description, loseMoney)
       rankingsCache.clear()
       setTimeout(() => rankingsCache.preloadCommonData(db), 100)
 
-      res.json({ success: true, id: seasonId, name, startDate, endDate, autoEnd, description })
+      res.json({ success: true, id: seasonId, name, startDate, endDate, autoEnd, description, loseMoney })
     })
   )
 
@@ -77,21 +79,23 @@ export const createSeasonRouter = ({
       body('startDate').isISO8601().withMessage('Valid start date is required'),
       body('endDate').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
       body('autoEnd').optional().isBoolean().withMessage('autoEnd must be boolean'),
-      body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string')
+      body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string'),
+      body('loseMoney').optional().isInt({ min: 0 }).withMessage('Lose money must be a non-negative integer')
     ],
     handleValidationErrors,
     asyncHandler(async (req, res) => {
       const seasonId = parseInt(req.params.id)
-      let { name, startDate, endDate, autoEnd = false, description = '' } = req.body
+      let { name, startDate, endDate, autoEnd = false, description = '', loseMoney = 0 } = req.body
       endDate = endDate || null
       description = description || ''
+      loseMoney = parseInt(loseMoney) || 0
 
       if (autoEnd && !endDate) {
         res.status(400).json({ success: false, error: 'Auto-end requires an end date to be set' })
         return
       }
 
-      await db.updateSeason(seasonId, name, startDate, endDate, autoEnd, description)
+      await db.updateSeason(seasonId, name, startDate, endDate, autoEnd, description, loseMoney)
       rankingsCache.clear()
       setTimeout(() => rankingsCache.preloadCommonData(db), 100)
       res.json({ success: true, message: 'Season updated successfully' })

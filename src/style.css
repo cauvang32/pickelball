@@ -392,6 +392,19 @@ header h1 {
   border-radius: 8px;
   font-size: 1rem;
   transition: border-color 0.3s ease;
+  box-sizing: border-box;
+}
+
+.modal .form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.3s ease;
+  background: white;
+  cursor: pointer;
+  box-sizing: border-box;
 }
 
 .modal .form-group textarea {
@@ -403,13 +416,21 @@ header h1 {
   font-family: inherit;
   transition: border-color 0.3s ease;
   resize: vertical;
+  box-sizing: border-box;
 }
 
 .modal .form-group input:focus,
-.modal .form-group textarea:focus {
+.modal .form-group textarea:focus,
+.modal .form-group select:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.modal .form-group input:disabled {
+  background-color: #f5f5f5;
+  color: #888;
+  cursor: not-allowed;
 }
 
 .modal .form-group small {
@@ -815,12 +836,12 @@ button:active {
 .match-form {
   position: relative;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(244, 248, 255, 0.92));
-  border-radius: 34px;
-  padding: clamp(1.35rem, 2.5vw, 2.75rem);
-  box-shadow: 0 35px 70px rgba(20, 13, 55, 0.2);
-  max-width: 980px;
-  width: min(98%, 980px);
-  margin: 0 auto 2.5rem;
+  border-radius: 24px;
+  padding: clamp(1rem, 2vw, 1.5rem);
+  box-shadow: 0 20px 40px rgba(20, 13, 55, 0.15);
+  max-width: 720px;
+  width: min(98%, 720px);
+  margin: 0 auto 1.5rem;
   border: 1px solid rgba(99, 102, 241, 0.15);
   overflow: hidden;
   backdrop-filter: blur(6px);
@@ -829,12 +850,12 @@ button:active {
 .match-form::before {
   content: '';
   position: absolute;
-  inset: 1rem;
-  border-radius: 28px;
+  inset: 0.5rem;
+  border-radius: 20px;
   background: radial-gradient(circle at 25% 15%, rgba(99, 102, 241, 0.18), transparent 50%),
               radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.7), transparent 40%),
               linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(76, 110, 245, 0.05));
-  filter: blur(35px);
+  filter: blur(25px);
   opacity: 0.65;
   pointer-events: none;
 }
@@ -856,23 +877,24 @@ button:active {
 .match-form .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.25rem;
   flex: 1;
-  min-width: 200px;
+  min-width: 140px;
 }
 
 .match-form .form-group label {
   font-weight: 500;
   color: #495057;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
 }
 
 .match-form .form-group input,
 .match-form .form-group select {
-  padding: 0.95rem 1.1rem;
+  padding: 0.6rem 0.85rem;
   border: 1.5px solid rgba(76, 110, 245, 0.2);
-  border-radius: 16px;
-  font-size: 1rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   background: #fdfdff;
   box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.05);
@@ -887,14 +909,14 @@ button:active {
 
 .form-row {
   display: flex;
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+  gap: 1rem;
+  margin-bottom: 1rem;
   flex-wrap: wrap;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(237, 243, 255, 0.9));
   border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 28px;
-  padding: 1.5rem 1.85rem;
-  box-shadow: 0 25px 55px rgba(15, 23, 42, 0.12);
+  border-radius: 16px;
+  padding: 0.875rem 1.25rem;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
 }
 
 /* Match Type Toggle */
@@ -904,22 +926,22 @@ button:active {
 
 .match-type-toggle {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
   background: var(--bg-light);
-  padding: 0.375rem;
-  border-radius: var(--radius-lg);
+  padding: 0.25rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
 }
 
 .match-type-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-family: 'Barlow', sans-serif;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition-normal);
@@ -928,8 +950,8 @@ button:active {
 }
 
 .match-type-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   stroke: currentColor;
   fill: none;
   flex-shrink: 0;
@@ -944,7 +966,7 @@ button:active {
 .match-type-btn.active {
   background: var(--gradient-primary);
   color: white;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .match-type-btn:active {
@@ -959,59 +981,68 @@ button:active {
 
 .teams-container {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) 80px minmax(300px, 1fr);
-  gap: clamp(1rem, 2vw, 2rem);
-  margin: 2.25rem 0 2rem;
+  grid-template-columns: 1fr 50px 1fr;
+  gap: 0.75rem;
+  margin: 1rem 0;
   align-items: stretch;
   position: relative;
-  padding: clamp(0.75rem, 1.8vw, 1.25rem);
+  padding: 0.75rem;
   background: linear-gradient(120deg, rgba(255, 255, 255, 0.94), rgba(238, 244, 255, 0.96));
-  border-radius: 30px;
+  border-radius: 18px;
   border: 1px solid rgba(99, 102, 241, 0.12);
-  box-shadow: inset 0 0 20px rgba(99, 102, 241, 0.05);
+  box-shadow: inset 0 0 15px rgba(99, 102, 241, 0.05);
 }
 
 .team-section {
   display: flex;
   flex-direction: column;
-  gap: 1.35rem;
-  padding: 1.9rem;
+  gap: 0.75rem;
+  padding: 1rem;
   background: radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.96), rgba(247, 249, 255, 0.9));
-  border-radius: 32px;
+  border-radius: 16px;
   border: 1.5px solid rgba(99, 102, 241, 0.18);
   transition: all 0.3s ease;
-  box-shadow: 0 30px 60px rgba(13, 8, 45, 0.14);
+  box-shadow: 0 15px 30px rgba(13, 8, 45, 0.1);
+  overflow: hidden;
+  min-width: 0;
 }
 
 .team-section:hover {
   border-color: rgba(76, 110, 245, 0.45);
-  transform: translateY(-6px);
-  box-shadow: 0 40px 70px rgba(13, 8, 45, 0.18);
+  transform: translateY(-3px);
+  box-shadow: 0 20px 40px rgba(13, 8, 45, 0.14);
 }
 
 .team-section h3 {
   text-align: center;
   color: var(--accent);
-  font-size: 1.15rem;
+  font-size: 0.95rem;
   margin: 0;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
   text-transform: uppercase;
 }
 
 .team-players {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
 }
 
 .team-players select {
-  padding: 0.95rem 1rem;
+  padding: 0.6rem 0.75rem;
   border: 1.5px solid rgba(99, 102, 241, 0.18);
-  border-radius: 18px;
+  border-radius: 10px;
   background: #f7f8ff;
   font-weight: 500;
+  font-size: 0.9rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
 }
 
 .team-players select:focus {
@@ -1024,9 +1055,9 @@ button:active {
 .team-score {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  margin-top: 0.75rem;
-  padding-top: 1rem;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
   border-top: 1px dashed rgba(99, 102, 241, 0.2);
 }
 
@@ -1038,10 +1069,10 @@ button:active {
 }
 
 .team-score input {
-  padding: 1rem;
+  padding: 0.6rem;
   border: 1.5px solid rgba(99, 102, 241, 0.2);
-  border-radius: 20px;
-  font-size: 1.5rem;
+  border-radius: 12px;
+  font-size: 1.25rem;
   text-align: center;
   font-weight: 700;
   transition: all 0.25s ease;
@@ -1083,35 +1114,35 @@ button:active {
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 1.2rem;
-  letter-spacing: 0.4px;
+  font-size: 1rem;
+  letter-spacing: 0.3px;
   color: #ff5e57;
   background: white;
   border-radius: 999px;
-  width: 60px;
-  height: 60px;
+  width: 44px;
+  height: 44px;
   border: 2px solid rgba(255, 94, 87, 0.22);
-  box-shadow: 0 18px 35px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
 }
 
 
 .winner-section {
-  margin-top: 2.2rem;
-  padding: 1.85rem;
+  margin-top: 1rem;
+  padding: 1rem;
   background: linear-gradient(145deg, rgba(239, 245, 255, 0.95), rgba(224, 236, 255, 0.92));
-  border-radius: 30px;
+  border-radius: 16px;
   border: 1px solid rgba(99, 102, 241, 0.15);
-  box-shadow: inset 0 0 35px rgba(99, 102, 241, 0.08);
+  box-shadow: inset 0 0 20px rgba(99, 102, 241, 0.06);
 }
 
 .auto-winner {
   text-align: center;
-  padding: 1.25rem;
+  padding: 0.75rem;
   background: white;
-  border-radius: 22px;
-  margin-bottom: 1.25rem;
+  border-radius: 12px;
+  margin-bottom: 0.75rem;
   border: 1px dashed rgba(99, 102, 241, 0.3);
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 500;
   color: #1f3b7b;
 }
@@ -1143,11 +1174,12 @@ button:active {
 }
 
 .manual-winner select {
-  min-width: 190px;
-  padding: 0.85rem 1rem;
-  border-radius: 18px;
+  min-width: 160px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
   border: 1.5px solid rgba(99, 102, 241, 0.2);
   background: #f6f7ff;
+  font-size: 0.9rem;
 }
 
 .winner-section .small-btn {
@@ -1220,25 +1252,25 @@ button:active {
   background: var(--gradient-success);
   color: white;
   border: none;
-  padding: 1rem 2rem;
+  padding: 0.75rem 1.5rem;
   border-radius: var(--radius-full);
   font-family: 'Barlow', sans-serif;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition-normal);
-  width: min(400px, 100%);
-  margin: 1.5rem auto 0;
+  width: min(320px, 100%);
+  margin: 1rem auto 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.625rem;
-  box-shadow: var(--shadow-lg);
+  gap: 0.5rem;
+  box-shadow: var(--shadow-md);
 }
 
 .record-btn svg {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   stroke: currentColor;
   fill: none;
   flex-shrink: 0;

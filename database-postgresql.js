@@ -84,10 +84,19 @@ class PickleballDatabasePostgreSQL {
           is_active BOOLEAN DEFAULT true,
           auto_end BOOLEAN DEFAULT true,
           description TEXT,
+          lose_money INTEGER DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           ended_at TIMESTAMP,
           ended_by VARCHAR(255)
         )
+      `)
+
+      // Add lose_money column if it doesn't exist (for existing databases)
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE seasons ADD COLUMN IF NOT EXISTS lose_money INTEGER DEFAULT 0;
+        EXCEPTION WHEN duplicate_column THEN NULL;
+        END $$;
       `)
 
       // Matches table
@@ -249,7 +258,7 @@ class PickleballDatabasePostgreSQL {
           WHEN end_date IS NOT NULL THEN TO_CHAR(end_date, 'YYYY-MM-DD')
           ELSE NULL 
         END as end_date,
-        is_active, auto_end, description, 
+        is_active, auto_end, description, lose_money,
         created_at, ended_at, ended_by
       FROM seasons 
       ORDER BY is_active DESC, start_date DESC
@@ -265,7 +274,7 @@ class PickleballDatabasePostgreSQL {
           WHEN end_date IS NOT NULL THEN TO_CHAR(end_date, 'YYYY-MM-DD')
           ELSE NULL 
         END as end_date,
-        is_active, auto_end, description,
+        is_active, auto_end, description, lose_money,
         created_at, ended_at, ended_by
       FROM seasons 
       WHERE is_active = true
@@ -283,7 +292,7 @@ class PickleballDatabasePostgreSQL {
           WHEN end_date IS NOT NULL THEN TO_CHAR(end_date, 'YYYY-MM-DD')
           ELSE NULL 
         END as end_date,
-        is_active, auto_end, description,
+        is_active, auto_end, description, lose_money,
         created_at, ended_at, ended_by
       FROM seasons 
       WHERE is_active = true
@@ -293,20 +302,22 @@ class PickleballDatabasePostgreSQL {
     return result.rows[0] || null
   }
 
-  async createSeason(name, startDate, endDate = null, autoEnd = true, description = '') {
+  async createSeason(name, startDate, endDate = null, autoEnd = true, description = '', loseMoney = 0) {
+    console.log('📝 DB createSeason - loseMoney:', loseMoney)
     const result = await this.query(`
-      INSERT INTO seasons (name, start_date, end_date, is_active, auto_end, description) 
-      VALUES ($1, $2, $3, true, $4, $5) RETURNING id
-    `, [name, startDate, endDate, autoEnd, description])
+      INSERT INTO seasons (name, start_date, end_date, is_active, auto_end, description, lose_money) 
+      VALUES ($1, $2, $3, true, $4, $5, $6) RETURNING id
+    `, [name, startDate, endDate, autoEnd, description, loseMoney])
     return result.rows[0].id
   }
 
-  async updateSeason(seasonId, name, startDate, endDate, autoEnd, description) {
+  async updateSeason(seasonId, name, startDate, endDate, autoEnd, description, loseMoney = 0) {
+    console.log('📝 DB updateSeason - loseMoney:', loseMoney, 'for season:', seasonId)
     await this.query(`
       UPDATE seasons 
-      SET name = $1, start_date = $2, end_date = $3, auto_end = $4, description = $5
-      WHERE id = $6
-    `, [name, startDate, endDate, autoEnd, description, seasonId])
+      SET name = $1, start_date = $2, end_date = $3, auto_end = $4, description = $5, lose_money = $6
+      WHERE id = $7
+    `, [name, startDate, endDate, autoEnd, description, loseMoney, seasonId])
   }
 
   async endSeason(seasonId, endDate, endedBy) {
@@ -520,7 +531,27 @@ class PickleballDatabasePostgreSQL {
   // Statistics and rankings
   async getPlayerStatsLifetime() {
     const result = await this.query(`
-      WITH player_stats AS (
+      WITH player_season_losses AS (
+        SELECT 
+          p.id as player_id,
+          s.id as season_id,
+          COALESCE(s.lose_money, 0) as lose_money,
+          COUNT(CASE WHEN 
+            (m.winning_team = 2 AND (m.player1_id = p.id OR m.player2_id = p.id)) OR 
+            (m.winning_team = 1 AND (m.player3_id = p.id OR m.player4_id = p.id))
+            THEN 1 END) as season_losses
+        FROM players p
+        CROSS JOIN seasons s
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+          AND m.season_id = s.id
+        GROUP BY p.id, s.id, s.lose_money
+      ),
+      player_money AS (
+        SELECT player_id, SUM(season_losses * lose_money) as total_money_lost
+        FROM player_season_losses
+        GROUP BY player_id
+      ),
+      player_stats AS (
         SELECT 
           p.id,
           p.name,
@@ -538,11 +569,12 @@ class PickleballDatabasePostgreSQL {
         GROUP BY p.id, p.name
       )
       SELECT 
-        *,
-        (wins * 4 + losses * 1) as points,
-        CASE WHEN (wins + losses) > 0 THEN ROUND((wins * 100.0) / (wins + losses), 1) ELSE 0 END as win_percentage,
-        losses * 20000 as money_lost
-      FROM player_stats
+        ps.*,
+        (ps.wins * 4 + ps.losses * 1) as points,
+        CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
+        COALESCE(pm.total_money_lost, 0) as money_lost
+      FROM player_stats ps
+      LEFT JOIN player_money pm ON ps.id = pm.player_id
       ORDER BY points DESC, win_percentage DESC, name ASC
     `)
     return result.rows
@@ -550,7 +582,10 @@ class PickleballDatabasePostgreSQL {
 
   async getPlayerStatsBySeason(seasonId) {
     const result = await this.query(`
-      WITH player_stats AS (
+      WITH season_info AS (
+        SELECT lose_money FROM seasons WHERE id = $1
+      ),
+      player_stats AS (
         SELECT 
           p.id,
           p.name,
@@ -569,11 +604,11 @@ class PickleballDatabasePostgreSQL {
         GROUP BY p.id, p.name
       )
       SELECT 
-        *,
-        (wins * 4 + losses * 1) as points,
-        CASE WHEN (wins + losses) > 0 THEN ROUND((wins * 100.0) / (wins + losses), 1) ELSE 0 END as win_percentage,
-        losses * 20000 as money_lost
-      FROM player_stats
+        ps.*,
+        (ps.wins * 4 + ps.losses * 1) as points,
+        CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
+        ps.losses * COALESCE((SELECT lose_money FROM season_info), 0) as money_lost
+      FROM player_stats ps
       ORDER BY points DESC, win_percentage DESC, name ASC
     `, [seasonId])
     return result.rows
@@ -581,7 +616,25 @@ class PickleballDatabasePostgreSQL {
 
   async getPlayerStatsByPlayDate(playDate) {
     const result = await this.query(`
-      WITH player_stats AS (
+      WITH player_match_losses AS (
+        SELECT 
+          p.id as player_id,
+          COALESCE(s.lose_money, 0) as lose_money,
+          CASE WHEN 
+            (m.winning_team = 2 AND (m.player1_id = p.id OR m.player2_id = p.id)) OR 
+            (m.winning_team = 1 AND (m.player3_id = p.id OR m.player4_id = p.id))
+            THEN 1 ELSE 0 END as is_loss
+        FROM players p
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+          AND DATE(m.play_date) <= $1
+        LEFT JOIN seasons s ON m.season_id = s.id
+      ),
+      player_money AS (
+        SELECT player_id, SUM(is_loss * lose_money) as total_money_lost
+        FROM player_match_losses
+        GROUP BY player_id
+      ),
+      player_stats AS (
         SELECT 
           p.id,
           p.name,
@@ -600,11 +653,12 @@ class PickleballDatabasePostgreSQL {
         GROUP BY p.id, p.name
       )
       SELECT 
-        *,
-        (wins * 4 + losses * 1) as points,
-        CASE WHEN (wins + losses) > 0 THEN ROUND((wins * 100.0) / (wins + losses), 1) ELSE 0 END as win_percentage,
-        losses * 20000 as money_lost
-      FROM player_stats
+        ps.*,
+        (ps.wins * 4 + ps.losses * 1) as points,
+        CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
+        COALESCE(pm.total_money_lost, 0) as money_lost
+      FROM player_stats ps
+      LEFT JOIN player_money pm ON ps.id = pm.player_id
       ORDER BY points DESC, win_percentage DESC, name ASC
     `, [playDate])
     return result.rows
@@ -612,7 +666,25 @@ class PickleballDatabasePostgreSQL {
 
   async getPlayerStatsBySpecificDate(playDate) {
     const result = await this.query(`
-      WITH player_stats AS (
+      WITH player_match_losses AS (
+        SELECT 
+          p.id as player_id,
+          COALESCE(s.lose_money, 0) as lose_money,
+          CASE WHEN 
+            (m.winning_team = 2 AND (m.player1_id = p.id OR m.player2_id = p.id)) OR 
+            (m.winning_team = 1 AND (m.player3_id = p.id OR m.player4_id = p.id))
+            THEN 1 ELSE 0 END as is_loss
+        FROM players p
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+          AND DATE(m.play_date) = $1
+        LEFT JOIN seasons s ON m.season_id = s.id
+      ),
+      player_money AS (
+        SELECT player_id, SUM(is_loss * lose_money) as total_money_lost
+        FROM player_match_losses
+        GROUP BY player_id
+      ),
+      player_stats AS (
         SELECT 
           p.id,
           p.name,
@@ -631,11 +703,12 @@ class PickleballDatabasePostgreSQL {
         GROUP BY p.id, p.name
       )
       SELECT 
-        *,
-        (wins * 4 + losses * 1) as points,
-        CASE WHEN (wins + losses) > 0 THEN ROUND((wins * 100.0) / (wins + losses), 1) ELSE 0 END as win_percentage,
-        losses * 20000 as money_lost
-      FROM player_stats
+        ps.*,
+        (ps.wins * 4 + ps.losses * 1) as points,
+        CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
+        COALESCE(pm.total_money_lost, 0) as money_lost
+      FROM player_stats ps
+      LEFT JOIN player_money pm ON ps.id = pm.player_id
       ORDER BY points DESC, win_percentage DESC, name ASC
     `, [playDate])
     return result.rows

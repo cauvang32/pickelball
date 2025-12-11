@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { param, validationResult } from 'express-validator'
 import ExcelJS from 'exceljs'
 import { asyncHandler } from '../utils/async-handler.js'
 
@@ -30,6 +31,15 @@ export const createExportRouter = ({
   exportLimiter
 }) => {
   const router = Router()
+
+  // Validation middleware
+  const handleValidationErrors = (req, res, next) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() })
+    }
+    next()
+  }
 
   router.get('/', checkAuth, conditionalRateLimit(exportLimiter), asyncHandler(async (req, res) => {
     const workbook = new ExcelJS.Workbook()
@@ -82,7 +92,12 @@ export const createExportRouter = ({
     res.send(buffer)
   }))
 
-  router.get('/date/:date', checkAuth, conditionalRateLimit(exportLimiter), asyncHandler(async (req, res) => {
+  router.get('/date/:date', 
+    checkAuth, 
+    conditionalRateLimit(exportLimiter),
+    [param('date').isISO8601().withMessage('Invalid date format. Use YYYY-MM-DD')],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
     const { date } = req.params
     const workbook = new ExcelJS.Workbook()
 
@@ -111,7 +126,12 @@ export const createExportRouter = ({
     res.send(buffer)
   }))
 
-  router.get('/season/:seasonId', checkAuth, conditionalRateLimit(exportLimiter), asyncHandler(async (req, res) => {
+  router.get('/season/:seasonId', 
+    checkAuth, 
+    conditionalRateLimit(exportLimiter),
+    [param('seasonId').isInt({ min: 1 }).withMessage('Invalid season ID')],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
     const { seasonId } = req.params
     const workbook = new ExcelJS.Workbook()
     const season = await db.getSeasonById(seasonId)

@@ -1561,16 +1561,21 @@ app.post('/api/seasons',
     body('startDate').isISO8601().withMessage('Valid start date is required'),
     body('endDate').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
     body('autoEnd').optional().isBoolean().withMessage('autoEnd must be boolean'),
-    body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string')
+    body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string'),
+    body('loseMoney').optional().isInt({ min: 0 }).withMessage('Lose money must be a non-negative integer')
   ],
   handleValidationErrors,
   async (req, res) => {
     try {
-      let { name, startDate, endDate, autoEnd = false, description = '' } = req.body
+      console.log('📝 Create season request body:', JSON.stringify(req.body))
+      let { name, startDate, endDate, autoEnd = false, description = '', loseMoney = 0 } = req.body
       
       // Sanitize empty strings to null
       endDate = endDate || null
       description = description || ''
+      loseMoney = parseInt(loseMoney) || 0
+      
+      console.log('📝 Parsed loseMoney:', loseMoney, 'from:', req.body.loseMoney)
       
       // Validate: autoEnd requires endDate
       if (autoEnd && !endDate) {
@@ -1586,7 +1591,7 @@ app.post('/api/seasons',
         console.log(`🏁 Auto-ended ${expiredSeasons.length} expired season(s)`)
       }
       
-      const seasonId = await db.createSeason(name, startDate, endDate, autoEnd, description)
+      const seasonId = await db.createSeason(name, startDate, endDate, autoEnd, description, loseMoney)
       
       // Invalidate all cache when seasons change
       rankingsCache.clear()
@@ -1594,7 +1599,7 @@ app.post('/api/seasons',
       // Preload common data for better hit rates
       setTimeout(() => rankingsCache.preloadCommonData(db), 100)
       
-      res.json({ success: true, id: seasonId, name, startDate, endDate, autoEnd, description })
+      res.json({ success: true, id: seasonId, name, startDate, endDate, autoEnd, description, loseMoney })
     } catch (error) {
       console.error('Error creating season:', error)
       res.status(500).json({ error: 'Failed to create season' })
@@ -1611,17 +1616,22 @@ app.put('/api/seasons/:id',
     body('startDate').isISO8601().withMessage('Valid start date is required'),
     body('endDate').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Valid end date is required'),
     body('autoEnd').optional().isBoolean().withMessage('autoEnd must be boolean'),
-    body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string')
+    body('description').optional({ nullable: true, checkFalsy: true }).isString().withMessage('Description must be string'),
+    body('loseMoney').optional().isInt({ min: 0 }).withMessage('Lose money must be a non-negative integer')
   ],
   handleValidationErrors,
   async (req, res) => {
     try {
       const seasonId = parseInt(req.params.id)
-      let { name, startDate, endDate, autoEnd = false, description = '' } = req.body
+      console.log('📝 Update season request body:', JSON.stringify(req.body))
+      let { name, startDate, endDate, autoEnd = false, description = '', loseMoney = 0 } = req.body
       
       // Sanitize empty strings to null
       endDate = endDate || null
       description = description || ''
+      loseMoney = parseInt(loseMoney) || 0
+      
+      console.log('📝 Parsed loseMoney:', loseMoney, 'from:', req.body.loseMoney)
       
       // Validate: autoEnd requires endDate
       if (autoEnd && !endDate) {
@@ -1631,7 +1641,7 @@ app.put('/api/seasons/:id',
         })
       }
       
-      await db.updateSeason(seasonId, name, startDate, endDate, autoEnd, description)
+      await db.updateSeason(seasonId, name, startDate, endDate, autoEnd, description, loseMoney)
       
       // Invalidate all cache when seasons are updated
       rankingsCache.clear()
@@ -1856,6 +1866,21 @@ app.post('/api/matches',
         return res.status(400).json({ error: 'All players must be different' })
       }
       
+      // Validate that all players belong to the season
+      const seasonPlayers = await db.getSeasonPlayers(seasonId)
+      const seasonPlayerIds = seasonPlayers.map(p => p.id)
+      const invalidPlayers = playerIds.filter(id => !seasonPlayerIds.includes(id))
+      if (invalidPlayers.length > 0) {
+        const allPlayers = await db.getAllPlayers()
+        const invalidPlayerNames = invalidPlayers.map(id => {
+          const player = allPlayers.find(p => p.id === id)
+          return player ? player.name : `ID ${id}`
+        })
+        return res.status(400).json({ 
+          error: `Người chơi không thuộc mùa giải này: ${invalidPlayerNames.join(', ')}` 
+        })
+      }
+      
       const matchId = await db.addMatch(seasonId, playDate, player1Id, player2Id, player3Id, player4Id, team1Score, team2Score, winningTeam)
       
       // Invalidate all cache after adding match
@@ -1923,6 +1948,21 @@ app.put('/api/matches/:id',
       const uniquePlayerIds = [...new Set(playerIds)]
       if (uniquePlayerIds.length !== 4) {
         return res.status(400).json({ error: 'All players must be different' })
+      }
+
+      // Validate that all players belong to the season
+      const seasonPlayers = await db.getSeasonPlayers(seasonId)
+      const seasonPlayerIds = seasonPlayers.map(p => p.id)
+      const invalidPlayers = playerIds.filter(id => !seasonPlayerIds.includes(id))
+      if (invalidPlayers.length > 0) {
+        const allPlayers = await db.getAllPlayers()
+        const invalidPlayerNames = invalidPlayers.map(id => {
+          const player = allPlayers.find(p => p.id === id)
+          return player ? player.name : `ID ${id}`
+        })
+        return res.status(400).json({ 
+          error: `Người chơi không thuộc mùa giải này: ${invalidPlayerNames.join(', ')}` 
+        })
       }
 
       // Check if match exists

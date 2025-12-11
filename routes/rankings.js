@@ -1,8 +1,18 @@
 import { Router } from 'express'
+import { param, validationResult } from 'express-validator'
 import { asyncHandler } from '../utils/async-handler.js'
 
 export const createRankingRouter = ({ db, checkAuth, rankingsCache }) => {
   const router = Router()
+
+  // Validation middleware
+  const handleValidationErrors = (req, res, next) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() })
+    }
+    next()
+  }
 
   router.get('/lifetime', checkAuth, asyncHandler(async (req, res) => {
     const cacheKey = 'rankings:lifetime'
@@ -24,7 +34,11 @@ export const createRankingRouter = ({ db, checkAuth, rankingsCache }) => {
     res.json(rankings)
   }))
 
-  router.get('/season/:seasonId', checkAuth, asyncHandler(async (req, res) => {
+  router.get('/season/:seasonId', 
+    checkAuth,
+    [param('seasonId').isInt({ min: 1 }).withMessage('Invalid season ID')],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
     const seasonId = parseInt(req.params.seasonId)
     const cacheKey = `rankings:season:${seasonId}`
     let rankings = rankingsCache.get(cacheKey)
@@ -45,7 +59,11 @@ export const createRankingRouter = ({ db, checkAuth, rankingsCache }) => {
     res.json(rankings)
   }))
 
-  router.get('/date/:date', checkAuth, asyncHandler(async (req, res) => {
+  router.get('/date/:date', 
+    checkAuth,
+    [param('date').isISO8601().withMessage('Invalid date format. Use YYYY-MM-DD')],
+    handleValidationErrors,
+    asyncHandler(async (req, res) => {
     const { date } = req.params
     const cacheKey = `rankings:date:${date}`
     let rankings = rankingsCache.get(cacheKey)
