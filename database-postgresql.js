@@ -551,6 +551,21 @@ class PickleballDatabasePostgreSQL {
         FROM player_season_losses
         GROUP BY player_id
       ),
+      player_points AS (
+        SELECT 
+          p.id as player_id,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team1_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team2_score, 0)
+            ELSE 0 END) as points_for,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team2_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team1_score, 0)
+            ELSE 0 END) as points_against
+        FROM players p
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+        GROUP BY p.id
+      ),
       player_stats AS (
         SELECT 
           p.id,
@@ -570,12 +585,15 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
-        (ps.wins - ps.losses) as goal_difference,
+        COALESCE(pp.points_for, 0) as points_for,
+        COALESCE(pp.points_against, 0) as points_against,
+        (COALESCE(pp.points_for, 0) - COALESCE(pp.points_against, 0)) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         COALESCE(pm.total_money_lost, 0) as money_lost
       FROM player_stats ps
       LEFT JOIN player_money pm ON ps.id = pm.player_id
+      LEFT JOIN player_points pp ON ps.id = pp.player_id
       ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `)
     return result.rows
@@ -585,6 +603,22 @@ class PickleballDatabasePostgreSQL {
     const result = await this.query(`
       WITH season_info AS (
         SELECT lose_money FROM seasons WHERE id = $1
+      ),
+      player_points AS (
+        SELECT 
+          p.id as player_id,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team1_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team2_score, 0)
+            ELSE 0 END) as points_for,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team2_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team1_score, 0)
+            ELSE 0 END) as points_against
+        FROM players p
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+          AND m.season_id = $1
+        GROUP BY p.id
       ),
       player_stats AS (
         SELECT 
@@ -606,11 +640,14 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
-        (ps.wins - ps.losses) as goal_difference,
+        COALESCE(pp.points_for, 0) as points_for,
+        COALESCE(pp.points_against, 0) as points_against,
+        (COALESCE(pp.points_for, 0) - COALESCE(pp.points_against, 0)) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         ps.losses * COALESCE((SELECT lose_money FROM season_info), 0) as money_lost
       FROM player_stats ps
+      LEFT JOIN player_points pp ON ps.id = pp.player_id
       ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `, [seasonId])
     return result.rows
@@ -636,6 +673,22 @@ class PickleballDatabasePostgreSQL {
         FROM player_match_losses
         GROUP BY player_id
       ),
+      player_points AS (
+        SELECT 
+          p.id as player_id,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team1_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team2_score, 0)
+            ELSE 0 END) as points_for,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team2_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team1_score, 0)
+            ELSE 0 END) as points_against
+        FROM players p
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+          AND DATE(m.play_date) <= $1
+        GROUP BY p.id
+      ),
       player_stats AS (
         SELECT 
           p.id,
@@ -656,12 +709,15 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
-        (ps.wins - ps.losses) as goal_difference,
+        COALESCE(pp.points_for, 0) as points_for,
+        COALESCE(pp.points_against, 0) as points_against,
+        (COALESCE(pp.points_for, 0) - COALESCE(pp.points_against, 0)) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         COALESCE(pm.total_money_lost, 0) as money_lost
       FROM player_stats ps
       LEFT JOIN player_money pm ON ps.id = pm.player_id
+      LEFT JOIN player_points pp ON ps.id = pp.player_id
       ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `, [playDate])
     return result.rows
@@ -687,6 +743,22 @@ class PickleballDatabasePostgreSQL {
         FROM player_match_losses
         GROUP BY player_id
       ),
+      player_points AS (
+        SELECT 
+          p.id as player_id,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team1_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team2_score, 0)
+            ELSE 0 END) as points_for,
+          SUM(CASE 
+            WHEN m.player1_id = p.id OR m.player2_id = p.id THEN COALESCE(m.team2_score, 0)
+            WHEN m.player3_id = p.id OR m.player4_id = p.id THEN COALESCE(m.team1_score, 0)
+            ELSE 0 END) as points_against
+        FROM players p
+        LEFT JOIN matches m ON (m.player1_id = p.id OR m.player2_id = p.id OR m.player3_id = p.id OR m.player4_id = p.id)
+          AND DATE(m.play_date) = $1
+        GROUP BY p.id
+      ),
       player_stats AS (
         SELECT 
           p.id,
@@ -707,12 +779,15 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
-        (ps.wins - ps.losses) as goal_difference,
+        COALESCE(pp.points_for, 0) as points_for,
+        COALESCE(pp.points_against, 0) as points_against,
+        (COALESCE(pp.points_for, 0) - COALESCE(pp.points_against, 0)) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         COALESCE(pm.total_money_lost, 0) as money_lost
       FROM player_stats ps
       LEFT JOIN player_money pm ON ps.id = pm.player_id
+      LEFT JOIN player_points pp ON ps.id = pp.player_id
       ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `, [playDate])
     return result.rows
