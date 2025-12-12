@@ -570,12 +570,13 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
+        (ps.wins - ps.losses) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         COALESCE(pm.total_money_lost, 0) as money_lost
       FROM player_stats ps
       LEFT JOIN player_money pm ON ps.id = pm.player_id
-      ORDER BY points DESC, win_percentage DESC, name ASC
+      ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `)
     return result.rows
   }
@@ -605,11 +606,12 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
+        (ps.wins - ps.losses) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         ps.losses * COALESCE((SELECT lose_money FROM season_info), 0) as money_lost
       FROM player_stats ps
-      ORDER BY points DESC, win_percentage DESC, name ASC
+      ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `, [seasonId])
     return result.rows
   }
@@ -654,12 +656,13 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
+        (ps.wins - ps.losses) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         COALESCE(pm.total_money_lost, 0) as money_lost
       FROM player_stats ps
       LEFT JOIN player_money pm ON ps.id = pm.player_id
-      ORDER BY points DESC, win_percentage DESC, name ASC
+      ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `, [playDate])
     return result.rows
   }
@@ -704,12 +707,13 @@ class PickleballDatabasePostgreSQL {
       )
       SELECT 
         ps.*,
+        (ps.wins - ps.losses) as goal_difference,
         (ps.wins * 4 + ps.losses * 1) as points,
         CASE WHEN (ps.wins + ps.losses) > 0 THEN ROUND((ps.wins * 100.0) / (ps.wins + ps.losses), 1) ELSE 0 END as win_percentage,
         COALESCE(pm.total_money_lost, 0) as money_lost
       FROM player_stats ps
       LEFT JOIN player_money pm ON ps.id = pm.player_id
-      ORDER BY points DESC, win_percentage DESC, name ASC
+      ORDER BY points DESC, goal_difference DESC, win_percentage DESC, name ASC
     `, [playDate])
     return result.rows
   }

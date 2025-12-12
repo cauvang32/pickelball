@@ -9,6 +9,7 @@ const buildRankingsSheet = (sheet, rankings) => {
     { header: 'Tên', key: 'name', width: 30 },
     { header: 'Thắng', key: 'wins', width: 10 },
     { header: 'Thua', key: 'losses', width: 10 },
+    { header: 'Hiệu số', key: 'goal_difference', width: 12 },
     { header: 'Tổng trận', key: 'total_matches', width: 15 },
     { header: 'Điểm', key: 'points', width: 10 },
     { header: 'Tỷ lệ thắng (%)', key: 'win_percentage', width: 15 },

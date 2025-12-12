@@ -1483,6 +1483,7 @@ class PickleballRankingSystem {
         <td>${player.name}</td>
         <td>${player.wins}</td>
         <td>${player.losses}</td>
+        <td>${player.goal_difference > 0 ? '+' : ''}${player.goal_difference}</td>
         <td>${player.total_matches}</td>
         <td>${player.points}</td>
         <td>${player.win_percentage}%</td>
